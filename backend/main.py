@@ -6,4 +6,4 @@ app = FastAPI()
 def home():
     return {"message": "KMRL Backend is running!"}
 
-print("KMRL Backend is running!")
+print("KMRL Backend running!")
