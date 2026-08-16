@@ -2,7 +2,7 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import shutil
 import os
-from database import init_db, save_to_db
+from database import init_db, save_to_db, init_search_db, index_document, search_documents
 from process import process_pdf
 
 app = FastAPI()
@@ -18,6 +18,7 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 init_db()
+init_search_db()
 
 @app.get("/")
 def home():
@@ -31,7 +32,7 @@ async def upload_file(file: UploadFile = File(...)):
     
     result = process_pdf(file_path)
     
-    save_to_db(
+    doc_id = save_to_db(
         filename=file.filename,
         category=result["category"],
         summary=result["summary"],
@@ -40,10 +41,25 @@ async def upload_file(file: UploadFile = File(...)):
         file_path=file_path
     )
     
+    # NEW: Add to search index so we can find it later
+    index_document(doc_id, file.filename, result["category"], result["summary"])
+    
     return {
         "filename": file.filename,
         "category": result["category"],
         "summary": result["summary"],
         "pages": result["pages"],
         "confidence": result["confidence"]
+    }
+@app.get("/search")
+def search_docs(q: str):
+    """
+    Search documents by keyword.
+    Example: /search?q=maintenance
+    """
+    results = search_documents(q)
+    return {
+        "query": q,
+        "count": len(results),
+        "results": results
     }

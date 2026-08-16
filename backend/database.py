@@ -20,5 +20,46 @@ def save_to_db(filename, category, summary, pages, confidence, file_path):
     c = conn.cursor()
     c.execute("INSERT INTO documents (filename, category, summary, pages, confidence, file_path) VALUES (?, ?, ?, ?, ?, ?)",
               (filename, category, summary, pages, confidence, file_path))
+    doc_id = c.lastrowid
     conn.commit()
     conn.close()
+    return doc_id
+
+def init_search_db():
+    """No-op: we use simple LIKE search instead of FTS5."""
+    pass
+
+def index_document(doc_id, filename, category, summary):
+    """No-op: no search index needed for LIKE search."""
+    pass
+
+def search_documents(query):
+    """Simple LIKE-based search (works on all systems)."""
+    conn = sqlite3.connect("kmrl.db")
+    c = conn.cursor()
+    
+    search_term = f"%{query}%"
+    
+    c.execute('''SELECT id, filename, category, summary, pages, confidence
+                 FROM documents
+                 WHERE filename LIKE ? 
+                    OR category LIKE ? 
+                    OR summary LIKE ?
+                 ORDER BY id DESC
+                 LIMIT 20''', (search_term, search_term, search_term))
+    
+    results = c.fetchall()
+    conn.close()
+    
+    documents = []
+    for row in results:
+        documents.append({
+            "id": row[0],
+            "filename": row[1],
+            "category": row[2],
+            "summary": row[3],
+            "pages": row[4],
+            "confidence": row[5]
+        })
+    
+    return documents
