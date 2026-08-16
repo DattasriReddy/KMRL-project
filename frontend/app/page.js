@@ -1,96 +1,94 @@
+"use client";
+
+import { useState } from "react";
+import UploadBox from "@/components/UploadBox";
+import ResultCard from "@/components/ResultCard";
+import Loading from "@/components/Loading";
+
 export default function Home() {
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleFileSelect = (file) => {
+    setSelectedFile(file);
+
+    // Temporary demo loading state
+    setIsLoading(true);
+
+    setTimeout(() => {
+      setIsLoading(false);
+    }, 1500);
+  };
+
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 px-6">
+    <main className="min-h-screen bg-[#08090d] px-5 py-12 text-white sm:py-20">
+      <div className="mx-auto max-w-5xl">
 
-      {/* Background Blur */}
-      <div className="absolute -top-40 left-0 h-96 w-96 rounded-full bg-cyan-500/20 blur-3xl" />
-      <div className="absolute bottom-0 right-0 h-[28rem] w-[28rem] rounded-full bg-indigo-600/20 blur-3xl" />
+        {/* HERO */}
+        <section className="mb-14 text-center">
 
-      {/* Grid */}
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.03)_1px,transparent_1px)] bg-[size:45px_45px]" />
+          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-violet-400/10 px-4 py-2 text-sm text-violet-300">
+            <span>✦</span>
+            AI-Powered Document Intelligence
+          </div>
 
-      <section className="relative z-10 mx-auto w-full max-w-5xl text-center">
+          <h1 className="text-4xl font-bold tracking-tight sm:text-6xl">
+            Turn documents into
+            <span className="block text-violet-400">
+              intelligence.
+            </span>
+          </h1>
 
-        <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-300">
-          ✨ OCR + Gemini Powered
-        </span>
-
-        <h1 className="mt-8 text-5xl font-black leading-tight text-white md:text-7xl">
-          Analyze Documents
-          <br />
-          <span className="bg-gradient-to-r from-cyan-400 via-indigo-400 to-purple-400 bg-clip-text text-transparent">
-            in Seconds
-          </span>
-        </h1>
-
-        <p className="mx-auto mt-6 max-w-2xl text-lg leading-8 text-slate-300">
-          Upload any PDF and let AI extract text,
-          classify documents, and generate concise summaries
-          in just a few seconds.
-        </p>
-
-        {/* Upload Card */}
-
-        <div className="mx-auto mt-16 max-w-xl rounded-3xl border border-white/10 bg-white/5 p-10 shadow-2xl backdrop-blur-xl transition duration-300 hover:-translate-y-2 hover:border-cyan-400/40">
-
-          <div className="mb-6 text-6xl">📄</div>
-
-          <h2 className="text-2xl font-bold text-white">
-            Drag & Drop PDF
-          </h2>
-
-          <p className="mt-3 text-slate-400">
-            or choose a file from your computer
+          <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-white/50 sm:text-lg">
+            Upload KMRL documents and let AI extract, classify and
+            summarize the information that matters.
           </p>
 
-          <button className="mt-8 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 px-8 py-3 font-semibold text-white transition duration-300 hover:scale-105">
-            Choose PDF
-          </button>
+        </section>
 
-          <p className="mt-6 text-sm text-slate-500">
-            Supports PDF up to 20 MB
-          </p>
 
-        </div>
+        {/* UPLOAD SECTION */}
+        <section className="mx-auto max-w-3xl">
 
-        {/* Features */}
+          <UploadBox
+            onFileSelect={handleFileSelect}
+            selectedFile={selectedFile}
+          />
 
-        <div className="mt-14 grid gap-6 md:grid-cols-3">
+        </section>
 
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
-            <div className="text-3xl">⚡</div>
-            <h3 className="mt-3 font-semibold text-white">
-              Fast OCR
-            </h3>
-            <p className="mt-2 text-sm text-slate-400">
-              Extract text from scanned PDFs quickly.
-            </p>
+
+        {/* LOADING */}
+        {isLoading && (
+          <section className="mx-auto mt-8 max-w-3xl">
+            <Loading />
+          </section>
+        )}
+
+
+        {/* RESULT */}
+        {!isLoading && selectedFile && (
+          <section className="mx-auto mt-8 max-w-3xl">
+
+            <ResultCard
+              category="Maintenance"
+              summary="The inspection report identifies electrical maintenance issues that require attention at the station."
+              pages={2}
+              confidence={98}
+            />
+
+          </section>
+        )}
+
+
+        {/* EMPTY STATE */}
+        {!selectedFile && !isLoading && (
+          <div className="mt-8 text-center text-sm text-white/30">
+            Upload a PDF to begin analysis
           </div>
+        )}
 
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
-            <div className="text-3xl">🧠</div>
-            <h3 className="mt-3 font-semibold text-white">
-              Gemini AI
-            </h3>
-            <p className="mt-2 text-sm text-slate-400">
-              Smart summaries and automatic categorization.
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
-            <div className="text-3xl">🔒</div>
-            <h3 className="mt-3 font-semibold text-white">
-              Secure
-            </h3>
-            <p className="mt-2 text-sm text-slate-400">
-              Your uploaded documents remain protected.
-            </p>
-          </div>
-
-        </div>
-
-      </section>
-
+      </div>
     </main>
   );
 }
