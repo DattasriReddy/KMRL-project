@@ -7,17 +7,38 @@ import Loading from "@/components/Loading";
 
 export default function Home() {
   const [selectedFile, setSelectedFile] = useState(null);
+  const [result, setResult] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleFileSelect = (file) => {
+  const handleFileSelect = async (file) => {
     setSelectedFile(file);
-
-    // Temporary demo loading state
+    setResult(null);
+    setError("");
     setIsLoading(true);
 
-    setTimeout(() => {
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("http://127.0.0.1:8000/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Upload failed");
+      }
+
+      const data = await response.json();
+
+      setResult(data);
+    } catch (err) {
+      console.error(err);
+      setError("Something went wrong while processing the PDF.");
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   return (
@@ -46,17 +67,13 @@ export default function Home() {
 
         </section>
 
-
-        {/* UPLOAD SECTION */}
+        {/* UPLOAD */}
         <section className="mx-auto max-w-3xl">
-
           <UploadBox
             onFileSelect={handleFileSelect}
             selectedFile={selectedFile}
           />
-
         </section>
-
 
         {/* LOADING */}
         {isLoading && (
@@ -65,21 +82,24 @@ export default function Home() {
           </section>
         )}
 
-
-        {/* RESULT */}
-        {!isLoading && selectedFile && (
-          <section className="mx-auto mt-8 max-w-3xl">
-
-            <ResultCard
-              category="Maintenance"
-              summary="The inspection report identifies electrical maintenance issues that require attention at the station."
-              pages={2}
-              confidence={98}
-            />
-
+        {/* ERROR */}
+        {!isLoading && error && (
+          <section className="mx-auto mt-8 max-w-3xl rounded-xl border border-red-400/20 bg-red-400/10 p-4 text-center text-red-300">
+            {error}
           </section>
         )}
 
+        {/* RESULT */}
+        {!isLoading && result && (
+          <section className="mx-auto mt-8 max-w-3xl">
+            <ResultCard
+              category={result.category}
+              summary={result.summary}
+              pages={result.pages}
+              confidence={result.confidence * 100}
+            />
+          </section>
+        )}
 
         {/* EMPTY STATE */}
         {!selectedFile && !isLoading && (

@@ -6,10 +6,13 @@ from database import init_db, save_to_db, init_search_db, index_document, search
 from process import extract_text_from_pdf, extract_text_from_image, extract_text_from_docx, analyze_with_groq, get_page_count
 
 app = FastAPI()
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
