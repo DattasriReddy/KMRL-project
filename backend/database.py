@@ -3,23 +3,29 @@ import sqlite3
 def init_db():
     conn = sqlite3.connect("kmrl.db")
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS documents (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        filename TEXT,
-        category TEXT,
-        summary TEXT,
-        pages INTEGER,
-        confidence REAL,
-        file_path TEXT
-    )''')
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT,
+            category TEXT,
+            summary TEXT,
+            pages INTEGER,
+            confidence REAL,
+            file_path TEXT,
+            extracted_text TEXT
+        )
+    """)
     conn.commit()
     conn.close()
 
-def save_to_db(filename, category, summary, pages, confidence, file_path):
+def save_to_db(filename, category, summary, pages, confidence, file_path, extracted_text):
     conn = sqlite3.connect("kmrl.db")
     c = conn.cursor()
-    c.execute("INSERT INTO documents (filename, category, summary, pages, confidence, file_path) VALUES (?, ?, ?, ?, ?, ?)",
-              (filename, category, summary, pages, confidence, file_path))
+    c.execute("""
+        INSERT INTO documents 
+        (filename, category, summary, pages, confidence, file_path, extracted_text)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (filename, category, summary, pages, confidence, file_path, extracted_text))
     doc_id = c.lastrowid
     conn.commit()
     conn.close()
