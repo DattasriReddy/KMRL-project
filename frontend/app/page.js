@@ -1,9 +1,13 @@
+<<<<<<< HEAD
 "use client";
 
 import { useState } from "react";
 import UploadBox from "@/components/UploadBox";
 import ResultCard from "@/components/ResultCard";
 import Loading from "@/components/Loading";
+=======
+import UploadSection from "../UploadSection";
+>>>>>>> 44d7734 (feat: complete document dashboard and upload UI)
 
 export default function Home() {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -39,6 +43,7 @@ export default function Home() {
             </span>
           </h1>
 
+<<<<<<< HEAD
           <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-white/50 sm:text-lg">
             Upload KMRL documents and let AI extract, classify and
             summarize the information that matters.
@@ -56,6 +61,33 @@ export default function Home() {
           />
 
         </section>
+=======
+        <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-300">
+          ✨ OCR + Gemini Powered
+        </span>
+
+        <h1 className="mt-8 text-5xl font-black leading-tight text-white md:text-7xl">
+          Analyze Documents
+          <br />
+          <span className="bg-gradient-to-r from-cyan-400 via-indigo-400 to-purple-400 bg-clip-text text-transparent">
+            in Seconds
+          </span>
+        </h1>
+
+        <p className="mx-auto mt-6 max-w-2xl text-lg leading-8 text-slate-300">
+          Upload any PDF and let AI extract text,
+          classify documents, and generate concise summaries
+          in just a few seconds.
+        </p>
+
+        {/* Upload Section */}
+        <div className="mx-auto mt-16 max-w-xl">
+          <UploadSection />
+        </div>
+
+        {/* Features */}
+        <div className="mt-14 grid gap-6 md:grid-cols-3">
+>>>>>>> 44d7734 (feat: complete document dashboard and upload UI)
 
 
         {/* LOADING */}
