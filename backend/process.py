@@ -13,6 +13,7 @@ load_dotenv()
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
+
 def get_page_count(pdf_path):
     try:
         reader = PdfReader(pdf_path)
@@ -20,6 +21,7 @@ def get_page_count(pdf_path):
     except Exception:
         images = convert_from_path(pdf_path)
         return len(images)
+
 
 def extract_text_from_pdf(pdf_path):
     print("Converting PDF to images...")
@@ -30,6 +32,7 @@ def extract_text_from_pdf(pdf_path):
         page_text = pytesseract.image_to_string(image)
         full_text += f"\n--- Page {i+1} ---\n{page_text}"
     return full_text
+
 
 def extract_text_from_image(image_path):
     """
@@ -44,19 +47,26 @@ def extract_text_from_image(image_path):
     # Do OCR
     text = pytesseract.image_to_string(img)
     return text
+
+
 def extract_text_from_docx(docx_path):
-    """
-    Takes a path to a .docx file,
-    extracts all text from paragraphs, and returns it.
-    """
-    from docx import Document
+    try:
+        from docx import Document
+        doc = Document(docx_path)
+        full_text = []
+        for para in doc.paragraphs:
+            if para.text.strip():
+                full_text.append(para.text)
+        
+        if not full_text:
+            return "[No text found in DOCX file]"
+        
+        return "\n".join(full_text)
     
-    doc = Document(docx_path)
-    full_text = []
-    for para in doc.paragraphs:
-        if para.text.strip():
-            full_text.append(para.text)
-    return "\n".join(full_text)
+    except Exception as e:
+        print(f"❌ DOCX extraction error: {e}")
+        return f"[Error extracting DOCX: {str(e)}]"
+
 
 def analyze_with_groq(text):
     import os
@@ -70,16 +80,19 @@ def analyze_with_groq(text):
         return {
             "category": "General",
             "summary": "API key missing. Please add GROQ_API_KEY to .env",
+            "action_items": [],
+            "deadline": "No deadline specified",
             "confidence": 0.0
         }
 
     client = Groq(api_key=api_key)
 
-    # Trim text to first 2000 characters to avoid token limit issues
-    trimmed_text = text[:2000] if text else ""
+    # Trim text to first 2500 characters to avoid token limit issues
+    trimmed_text = text[:2500] if text else ""
 
     prompt = f"""
 You are an expert document classifier for Kochi Metro Rail Limited (KMRL).
+
 Classify the document into EXACTLY ONE of these specific categories:
 - Tender / Bid Document
 - Maintenance Log / Work Order
@@ -90,16 +103,39 @@ Classify the document into EXACTLY ONE of these specific categories:
 - HR / Personnel Record
 - Other (if none of the above fits)
 
-Instructions:
-- Read the text carefully.
-- Provide a concise summary (max 3 sentences) highlighting the main purpose.
-- Give a confidence score from 0.0 to 1.0 (1.0 = very certain).
-- If the document is unclear, still pick the closest category and lower your confidence.
+Then, extract the following information:
+1. **Summary**: A brief summary (max 3 sentences) of the document's main purpose.
+
+2. **Action Items**: 
+   - Look for specific tasks, actions, or follow-ups mentioned in the document.
+   - For tender documents: Look for required submissions (e.g., "Submit bid", "Attend pre-bid meeting", "Provide documentation").
+   - For maintenance: Look for repair tasks or inspections.
+   - For policies: Look for required actions (e.g., "Update portal", "Notify employees").
+   - If you find NO action items, return an empty list: [].
+   - IMPORTANT: Even if the document doesn't use the words "action items", extract the tasks that need to be done.
+
+3. **Deadline**: 
+   - Look for specific dates like "DD-MM-YYYY", "DD/MM/YYYY", or phrases like "by September", "submission date", "closing date".
+   - For tender documents: Look for "bid submission deadline", "closing date", or "due date".
+   - If you find NO deadline, return "No deadline specified".
+
+4. **Confidence**: A score from 0.0 to 1.0 (1.0 = very certain).
+
+IMPORTANT RULES:
+- Tender documents often contain sections like "Scope of Work", "Eligibility Criteria", "Submission Requirements".
+- Look for bullet points or numbered lists for action items.
+- If you're unsure about any field, still make your best guess.
 
 Output ONLY valid JSON with exactly these keys:
-{{"category": "...", "summary": "...", "confidence": 0.85}}
+{{
+    "category": "...",
+    "summary": "...",
+    "action_items": ["task 1", "task 2"],
+    "deadline": "YYYY-MM-DD or No deadline specified",
+    "confidence": 0.85
+}}
 
-Document text (first 2000 characters):
+Document text (first 2500 characters):
 {trimmed_text}
 """
 
@@ -111,11 +147,11 @@ Document text (first 2000 characters):
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3,
-            response_format={"type": "json_object"}  # ensures JSON output
+            response_format={"type": "json_object"}
         )
 
         response_text = completion.choices[0].message.content
-        print(f"✅ Groq raw response: {response_text}")  # See in terminal
+        print(f"✅ Groq raw response: {response_text}")
 
         # Parse JSON
         result = json.loads(response_text)
@@ -124,6 +160,8 @@ Document text (first 2000 characters):
         return {
             "category": result.get("category", "Other"),
             "summary": result.get("summary", "No summary provided."),
+            "action_items": result.get("action_items", []),
+            "deadline": result.get("deadline", "No deadline specified"),
             "confidence": float(result.get("confidence", 0.5))
         }
 
@@ -132,8 +170,11 @@ Document text (first 2000 characters):
         return {
             "category": "General",
             "summary": f"Failed to analyze document. Error: {str(e)}",
+            "action_items": [],
+            "deadline": "No deadline specified",
             "confidence": 0.0
         }
+
 
 def process_pdf(pdf_path):
     print(f"Processing: {pdf_path}")
