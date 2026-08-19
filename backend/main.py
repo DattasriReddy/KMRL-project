@@ -187,3 +187,21 @@ def search_docs(q: str):
         "count": len(results),
         "results": results
     }
+@app.get("/bugs")
+def view_bugs():
+    """Display all bugs from bugs.csv as a web page"""
+    import csv
+    import os
+    
+    if not os.path.isfile("bugs.csv"):
+        return {"message": "No bugs found yet. Upload some documents!"}
+    
+    with open("bugs.csv", 'r', encoding='utf-8') as file:
+        reader = csv.reader(file)
+        data = list(reader)
+    
+    # Return as JSON – frontend can display it nicely
+    return {
+        "total_bugs": len(data) - 1 if data else 0,
+        "bugs": data
+    }
