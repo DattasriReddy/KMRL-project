@@ -9,6 +9,8 @@ def init_db():
             filename TEXT,
             category TEXT,
             summary TEXT,
+            action_items TEXT,   -- NEW: store as JSON string
+            deadline TEXT,       -- NEW
             pages INTEGER,
             confidence REAL,
             file_path TEXT,
@@ -18,14 +20,15 @@ def init_db():
     conn.commit()
     conn.close()
 
-def save_to_db(filename, category, summary, pages, confidence, file_path, extracted_text):
+def save_to_db(filename, category, summary, action_items, deadline, pages, confidence, file_path, extracted_text):
+    import json
     conn = sqlite3.connect("kmrl.db")
     c = conn.cursor()
     c.execute("""
         INSERT INTO documents 
-        (filename, category, summary, pages, confidence, file_path, extracted_text)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (filename, category, summary, pages, confidence, file_path, extracted_text))
+        (filename, category, summary, action_items, deadline, pages, confidence, file_path, extracted_text)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (filename, category, summary, json.dumps(action_items), deadline, pages, confidence, file_path, extracted_text))
     doc_id = c.lastrowid
     conn.commit()
     conn.close()
