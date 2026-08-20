@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import UploadBox from "@/components/UploadBox";
 import ResultCard from "@/components/ResultCard";
 import Loading from "@/components/Loading";
 
 export default function Home() {
+  const router = useRouter();
   const [selectedFile, setSelectedFile] = useState(null);
   const [result, setResult] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -33,6 +35,9 @@ export default function Home() {
       const data = await response.json();
 
       setResult(data);
+      setTimeout(() => {
+        router.push("/dashboard");
+      }, 1000);
     } catch (err) {
       console.error(err);
       setError("Something went wrong while processing the PDF.");

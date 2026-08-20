@@ -1,90 +1,161 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import DashboardStats from "../../components/DashboardStats";
 import DocumentCard from "../../components/DocumentCard";
 import SearchBar from "../../components/SearchBar";
 import CategoryFilter from "../../components/CategoryFilter";
 
-const documents = [
-  {
-    id: 1,
-    name: "Project Report.pdf",
-    category: "Report",
-    size: "2.4 MB",
-    status: "Processed",
-    createdAt: "Today",
-  },
-  {
-    id: 2,
-    name: "Resume.pdf",
-    category: "Resume",
-    size: "1.2 MB",
-    status: "Processed",
-    createdAt: "Yesterday",
-  },
-  {
-    id: 3,
-    name: "Research Paper.pdf",
-    category: "Research",
-    size: "3.8 MB",
-    status: "Processing",
-    createdAt: "2 days ago",
-  },
-  {
-    id: 4,
-    name: "Invoice.pdf",
-    category: "Invoice",
-    size: "850 KB",
-    status: "Processed",
-    createdAt: "3 days ago",
-  },
-];
-
-const categories = [
-  "All",
-  "Resume",
-  "Report",
-  "Invoice",
-  "Research",
-  "Other",
-];
+const API_URL = "http://127.0.0.1:8000";
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const [documents, setDocuments] = useState([]);
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const filteredDocuments = useMemo(() => {
-    return documents.filter((document) => {
-      const matchesSearch = document.name
-        .toLowerCase()
-        .includes(search.toLowerCase());
+  // Load documents from backend
+  const loadDocuments = async () => {
+    try {
+      setIsLoading(true);
+      setError("");
 
-      const matchesCategory =
-        selectedCategory === "All" ||
-        document.category === selectedCategory;
+      const response = await fetch(`${API_URL}/documents`);
 
-      return matchesSearch && matchesCategory;
-    });
-  }, [search, selectedCategory]);
+      if (!response.ok) {
+        throw new Error("Failed to load documents");
+      }
+
+      const data = await response.json();
+
+      setDocuments(data.documents || data);
+    } catch (err) {
+      console.error(err);
+      setError("Could not load documents from the backend.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDocuments();
+  }, []);
+
+  // Categories come from the actual documents
+  const categories = useMemo(() => {
+    const uniqueCategories = [
+      ...new Set(documents.map((document) => document.category)),
+    ];
+
+    return ["All", ...uniqueCategories];
+  }, [documents]);
+
+  // Search + category filtering
+  const [searchResults, setSearchResults] = useState(null);
+
+useEffect(() => {
+  if (!search.trim()) {
+    setSearchResults(null);
+    return;
+  }
+
+  const searchDocuments = async () => {
+    try {
+      const response = await fetch(
+        `${API_URL}/search?q=${encodeURIComponent(search)}`
+      );
+
+      if (!response.ok) {
+        throw new Error("Search failed");
+      }
+
+      const data = await response.json();
+      setSearchResults(data.results || []);
+    } catch (err) {
+      console.error(err);
+      setSearchResults([]);
+    }
+  };
+
+  const timer = setTimeout(searchDocuments, 300);
+
+  return () => clearTimeout(timer);
+}, [search]);
+
+const filteredDocuments = useMemo(() => {
+  const sourceDocuments = searchResults ?? documents;
+
+  return sourceDocuments.filter((document) => {
+    const category = document.category || "";
+
+    return (
+      selectedCategory === "All" ||
+      category === selectedCategory
+    );
+  });
+}, [documents, searchResults, selectedCategory]);
+
+  // Convert backend document format to DocumentCard format
+  const cardDocuments = filteredDocuments.map((document) => ({
+    ...document,
+    name: document.filename,
+    status: "Processed",
+    createdAt: "Recently added",
+    size: "Available",
+  }));
 
   const handleView = (document) => {
-    console.log("View document:", document);
+    router.push(`/documents/${document.id}`);
   };
 
   const handleDownload = (document) => {
-    console.log("Download document:", document);
+    window.open(
+    `${API_URL}/documents/${document.id}/download`,
+    "_blank"
+  );
   };
 
-  const handleDelete = (documentId) => {
-    console.log("Delete document:", documentId);
+  const handleDelete = async (documentId) => {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this document?"
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${API_URL}/documents/${documentId}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Delete failed");
+      }
+
+      // Remove deleted document from the UI
+      setDocuments((currentDocuments) =>
+        currentDocuments.filter(
+          (document) => document.id !== documentId
+        )
+      );
+    } catch (err) {
+      console.error(err);
+      alert("Could not delete the document.");
+    }
   };
 
   return (
     <main className="min-h-screen bg-slate-950 px-4 py-8 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
 
-        {/* Header */}
+        {/* HEADER */}
         <div className="mb-8">
           <p className="text-sm font-medium text-cyan-400">
             Document Management
@@ -100,14 +171,15 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Statistics */}
+        {/* STATISTICS */}
         <section className="mb-8">
           <DashboardStats />
         </section>
 
-        {/* Search and Category Filter */}
+        {/* SEARCH + FILTER */}
         <section className="mb-8 rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur">
           <div className="flex flex-col gap-5">
+
             <SearchBar
               value={search}
               onChange={setSearch}
@@ -118,12 +190,15 @@ export default function DashboardPage() {
               selectedCategory={selectedCategory}
               onCategoryChange={setSelectedCategory}
             />
+
           </div>
         </section>
 
-        {/* Documents Header */}
+        {/* DOCUMENTS */}
         <section>
+
           <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+
             <div>
               <h2 className="text-2xl font-bold text-white">
                 Your Documents
@@ -134,12 +209,38 @@ export default function DashboardPage() {
                 {filteredDocuments.length !== 1 ? "s" : ""} found
               </p>
             </div>
+
           </div>
 
-          {/* Document Cards */}
-          {filteredDocuments.length > 0 ? (
+          {/* LOADING */}
+          {isLoading && (
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-6 py-16 text-center">
+              <p className="text-slate-400">
+                Loading documents...
+              </p>
+            </div>
+          )}
+
+          {/* ERROR */}
+          {!isLoading && error && (
+            <div className="rounded-2xl border border-red-400/20 bg-red-400/10 px-6 py-16 text-center">
+              <p className="text-red-300">
+                {error}
+              </p>
+
+              <button
+                onClick={loadDocuments}
+                className="mt-4 rounded-lg bg-white px-4 py-2 text-sm font-medium text-gray-900"
+              >
+                Try Again
+              </button>
+            </div>
+          )}
+
+          {/* DOCUMENT CARDS */}
+          {!isLoading && !error && cardDocuments.length > 0 && (
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-              {filteredDocuments.map((document) => (
+              {cardDocuments.map((document) => (
                 <DocumentCard
                   key={document.id}
                   document={document}
@@ -149,24 +250,33 @@ export default function DashboardPage() {
                 />
               ))}
             </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed border-white/20 bg-white/5 px-6 py-16 text-center">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-2xl">
-                📄
-              </div>
-
-              <h3 className="mt-4 text-lg font-semibold text-white">
-                No documents found
-              </h3>
-
-              <p className="mt-2 text-sm text-slate-400">
-                Try another search term or select a different category.
-              </p>
-            </div>
           )}
+
+          {/* EMPTY */}
+          {!isLoading &&
+            !error &&
+            cardDocuments.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-white/20 bg-white/5 px-6 py-16 text-center">
+
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-2xl">
+                  📄
+                </div>
+
+                <h3 className="mt-4 text-lg font-semibold text-white">
+                  No documents found
+                </h3>
+
+                <p className="mt-2 text-sm text-slate-400">
+                  Try another search term or select a different category.
+                </p>
+
+              </div>
+            )}
+
         </section>
 
       </div>
     </main>
   );
 }
+
