@@ -1,12 +1,27 @@
 node_modules/
 .next/
 
+# Python
 venv/
 .venv/
 __pycache__/
+*.py[cod]
 
+# Environment variables / secrets
 .env
 .env.*
 !.env.example
 
+# IDE
 .vscode/
+
+# KMRL generated/local files
+uploads/
+*.db
+*.sqlite
+*.sqlite3
+bugs.csv
+
+# OS
+.DS_Store
+Thumbs.db
