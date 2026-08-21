@@ -9,3 +9,7 @@ Timestamp,Document Name,File Type,Expected Category,Actual Category,Expected Act
 2026-08-21 11:35:13,Declaration Form English.pdf,PDF,N/A,Other,N/A,[],N/A,No deadline specified,Document classified as 'Other' or 'General',Unfixed
 2026-08-21 11:35:13,Declaration Form English.pdf,PDF,N/A,Other,N/A,[],N/A,No deadline specified,No action items extracted despite high confidence,Unfixed
 2026-08-21 11:46:09,RFP_KMRL_3.0_.docx,PDF,N/A,Tender / Bid Document,N/A,[],N/A,No deadline specified,No action items extracted despite high confidence,Unfixed
+2026-08-21 17:29:16,Form_6_English (1).pdf,PDF,N/A,Other,N/A,[],N/A,No deadline specified,Low confidence score: 0,Unfixed
+2026-08-21 17:29:16,Form_6_English (1).pdf,PDF,N/A,Other,N/A,[],N/A,No deadline specified,Document classified as 'Other' or 'General',Unfixed
+2026-08-21 17:41:30,Form_6_English (1).pdf,PDF,N/A,Other,N/A,[],N/A,No deadline specified,Document classified as 'Other' or 'General',Unfixed
+2026-08-21 17:41:30,Form_6_English (1).pdf,PDF,N/A,Other,N/A,[],N/A,No deadline specified,No action items extracted despite high confidence,Unfixed

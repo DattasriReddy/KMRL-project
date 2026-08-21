@@ -23,7 +23,7 @@ from process import (
     extract_text_from_pdf,
     extract_text_from_image,
     extract_text_from_docx,
-    analyze_with_groq,
+    analyze_document,
     get_page_count,
 )
 
@@ -134,7 +134,7 @@ async def upload_file(file: UploadFile = File(...)):
                 deadline_actual="N/A",
             )
 
-        analysis = analyze_with_groq(extracted_text)
+        analysis = analyze_document(extracted_text)
 
         confidence = analysis.get("confidence", 0)
         category = analysis.get("category", "General")

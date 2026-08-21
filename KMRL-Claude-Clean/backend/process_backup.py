@@ -16,6 +16,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Windows ONLY:
+# Uncomment this if Tesseract is not automatically detected.
+#
+# pytesseract.pytesseract.tesseract_cmd = (
+#     r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# )
+
 
 # ============================================================
 # CONSTANTS
@@ -33,10 +40,8 @@ CATEGORIES = [
 ]
 
 
-# ============================================================
-# KMRL / METRO EVIDENCE
-# ============================================================
-
+# Terms that indicate the document is actually related
+# to Kochi Metro Rail Limited / metro operations.
 KMRL_TERMS = [
     "kochi metro",
     "kochi metro rail",
@@ -54,10 +59,7 @@ KMRL_TERMS = [
 ]
 
 
-# ============================================================
-# CATEGORY EVIDENCE
-# ============================================================
-
+# Category-specific terms.
 CATEGORY_TERMS = {
 
     "Tender / Bid Document": [
@@ -182,7 +184,7 @@ CATEGORY_TERMS = {
 
 
 # ============================================================
-# OCR / FILE FUNCTIONS
+# FILE / OCR FUNCTIONS
 # ============================================================
 
 def get_page_count(pdf_path):
@@ -195,7 +197,6 @@ def get_page_count(pdf_path):
         return len(reader.pages)
 
     except Exception:
-
         try:
             images = convert_from_path(pdf_path)
             return len(images)
@@ -206,10 +207,11 @@ def get_page_count(pdf_path):
 
 def extract_text_from_pdf(pdf_path):
     """
-    OCR the COMPLETE PDF.
+    Convert every PDF page to an image and perform OCR.
 
     IMPORTANT:
-    There is NO 2500-character limitation here.
+    The entire document is OCR'd.
+    There is no 2500-character OCR limitation here.
     """
 
     print("Converting PDF to images...")
@@ -250,14 +252,16 @@ def extract_text_from_image(image_path):
 
     image = Image.open(image_path)
 
-    return pytesseract.image_to_string(
+    text = pytesseract.image_to_string(
         image
     )
+
+    return text
 
 
 def extract_text_from_docx(docx_path):
     """
-    Extract text from DOCX.
+    Extract text from a DOCX document.
     """
 
     try:
@@ -276,7 +280,6 @@ def extract_text_from_docx(docx_path):
                 paragraphs.append(text)
 
         if not paragraphs:
-
             return "[No text found in DOCX file]"
 
         return "\n".join(paragraphs)
@@ -298,7 +301,7 @@ def extract_text_from_docx(docx_path):
 
 def normalize_text(text):
     """
-    Normalize OCR text before keyword matching.
+    Normalize OCR text for keyword matching.
     """
 
     if not text:
@@ -317,7 +320,7 @@ def normalize_text(text):
 
 def find_matching_terms(text, terms):
     """
-    Return unique terms actually found in the text.
+    Return the terms that actually appear in the document.
     """
 
     normalized = normalize_text(text)
@@ -332,24 +335,24 @@ def find_matching_terms(text, terms):
             continue
 
         if normalized_term in normalized:
-
             matches.append(term)
 
     return matches
 
 
 # ============================================================
-# CATEGORY KEYWORD STRENGTH
+# EVIDENCE SCORING
 # ============================================================
 
 def category_keyword_strength(text, category):
     """
-    Calculate deterministic evidence for a category.
+    Calculate normalized evidence strength for one category.
 
-    0.0 = no evidence
-    1.0 = very strong keyword evidence
+    The result is between 0.0 and 1.0.
 
-    Maximum contribution is capped at five matching terms.
+    We normalize by the number of useful terms instead of simply
+    counting raw keywords, because different categories contain
+    different numbers of keywords.
     """
 
     terms = CATEGORY_TERMS.get(
@@ -368,28 +371,29 @@ def category_keyword_strength(text, category):
     if not matches:
         return 0.0, []
 
+    # We do not want 20 repeated keywords to automatically
+    # produce 100% confidence.
+    #
+    # Five independent matching terms is treated as very strong
+    # keyword evidence.
     capped_matches = min(
         len(matches),
         5
     )
 
-    strength = (
-        capped_matches / 5.0
-    )
+    strength = capped_matches / 5.0
 
     return strength, matches
 
 
-# ============================================================
-# KMRL RELEVANCE
-# ============================================================
-
 def kmrl_relevance_strength(text):
     """
-    Measure explicit KMRL / metro relevance.
+    Measure how strongly the document contains explicit KMRL
+    / Kochi Metro signals.
 
-    0.0 = no KMRL evidence
-    1.0 = very strong KMRL evidence
+    Returns:
+        strength: 0.0 - 1.0
+        matches: actual matching terms
     """
 
     matches = find_matching_terms(
@@ -398,7 +402,6 @@ def kmrl_relevance_strength(text):
     )
 
     if not matches:
-
         return 0.0, []
 
     capped_matches = min(
@@ -406,9 +409,7 @@ def kmrl_relevance_strength(text):
         4
     )
 
-    strength = (
-        capped_matches / 4.0
-    )
+    strength = capped_matches / 4.0
 
     return strength, matches
 
@@ -417,23 +418,20 @@ def kmrl_relevance_strength(text):
 # SOFTMAX
 # ============================================================
 
-def softmax(
-    score_dictionary,
-    temperature=0.50
-):
+def softmax(score_dictionary, temperature=1.0):
     """
-    Convert raw category evidence scores into
-    normalized probabilities.
+    Convert category scores into normalized probabilities.
 
-    Temperature controls how strongly the highest
-    score dominates the others.
+    P(category) =
+        exp(score / temperature)
+        -----------------------
+        sum(exp(score_j / temperature))
+
+    The returned probabilities sum to 1.
     """
 
     if not score_dictionary:
         return {}
-
-    if temperature <= 0:
-        temperature = 0.50
 
     adjusted_scores = {}
 
@@ -460,14 +458,12 @@ def softmax(
     )
 
     if total <= 0:
-
-        probability = (
-            1.0 /
-            len(score_dictionary)
+        equal_probability = (
+            1.0 / len(score_dictionary)
         )
 
         return {
-            category: probability
+            category: equal_probability
             for category in score_dictionary
         }
 
@@ -483,10 +479,10 @@ def softmax(
 
 def analyze_with_groq(text):
     """
-    Groq performs semantic classification.
+    Ask Groq to semantically analyze the document.
 
-    Groq's confidence_hint is NOT treated as mathematical truth.
-    It is only one input into the final confidence calculation.
+    Groq's confidence is NOT treated as mathematical truth.
+    It is one input into the final confidence calculation.
     """
 
     api_key = os.getenv(
@@ -501,9 +497,13 @@ def analyze_with_groq(text):
 
         return {
             "category": "Other",
-            "summary": "GROQ_API_KEY is missing.",
+            "summary": (
+                "GROQ_API_KEY is missing."
+            ),
             "action_items": [],
-            "deadline": "No deadline specified",
+            "deadline": (
+                "No deadline specified"
+            ),
             "evidence": [],
             "confidence_hint": 0.0,
         }
@@ -515,10 +515,17 @@ def analyze_with_groq(text):
     if not text:
         text = "[No text extracted]"
 
-
-    # ========================================================
-    # REPRESENTATIVE TEXT SELECTION
-    # ========================================================
+    # --------------------------------------------------------
+    # Document length handling
+    # --------------------------------------------------------
+    #
+    # We OCR the COMPLETE document.
+    #
+    # Groq does not necessarily need every character of a huge
+    # document. Instead of only taking the first 2500 characters,
+    # we take representative sections from the beginning,
+    # middle, and end.
+    # --------------------------------------------------------
 
     MAX_ANALYSIS_CHARS = 12000
 
@@ -566,16 +573,15 @@ def analyze_with_groq(text):
             + ending
         )
 
-
-    # ========================================================
-    # GROQ PROMPT
-    # ========================================================
+    # --------------------------------------------------------
+    # Prompt
+    # --------------------------------------------------------
 
     prompt = f"""
 You are an expert document classifier for
 Kochi Metro Rail Limited (KMRL).
 
-Classify the document into EXACTLY ONE category:
+Classify this document into EXACTLY ONE of these categories:
 
 - Tender / Bid Document
 - Maintenance Log / Work Order
@@ -586,33 +592,19 @@ Classify the document into EXACTLY ONE category:
 - HR / Personnel Record
 - Other
 
-IMPORTANT:
+IMPORTANT CLASSIFICATION RULE:
 
-"Other" means the document does not belong to the
-KMRL document categories above.
+"Other" means the document is not one of the KMRL
+document categories above.
 
-Do NOT classify a document as KMRL-related merely
-because generic words such as:
-
-form
-report
-maintenance
-inspection
-application
-office
-procedure
-
-appear.
+Do not classify a document as KMRL-related merely because
+generic words such as "form", "report", "maintenance",
+"inspection", "application", or "office" appear.
 
 Look for contextual evidence.
 
-For example:
-
-An Election Commission voter registration Form-6
-must be classified as "Other".
-
-A KMRL maintenance work order should be classified as
-"Maintenance Log / Work Order".
+For example, a voter registration form should be classified
+as Other even if it is an official government document.
 
 Provide:
 
@@ -623,17 +615,20 @@ Provide:
 5. evidence
 6. confidence_hint
 
-The evidence field must contain short phrases actually
-supported by the supplied document text.
+The evidence field must contain short phrases that are
+actually supported by the supplied document text.
 
-The confidence_hint must be a number from 0.0 to 1.0.
+The confidence_hint should be your semantic assessment
+from 0.0 to 1.0.
 
 IMPORTANT:
 
-confidence_hint is NOT the final system confidence.
+Your confidence_hint is NOT the final system confidence.
+The application will independently calculate confidence
+using document evidence.
 
-The application independently calculates final confidence
-using deterministic evidence.
+For "Other", evidence should explain why the document
+appears unrelated to KMRL.
 
 Return ONLY valid JSON.
 
@@ -642,8 +637,11 @@ Use exactly this structure:
 {{
     "category": "Tender / Bid Document",
     "summary": "Brief summary of the document.",
-    "action_items": [],
-    "deadline": "No deadline specified",
+    "action_items": [
+        "Task 1",
+        "Task 2"
+    ],
+    "deadline": "YYYY-MM-DD or No deadline specified",
     "evidence": [
         "Kochi Metro Rail Limited",
         "Tender Notice"
@@ -655,11 +653,6 @@ DOCUMENT TEXT:
 
 {analysis_text}
 """
-
-
-    # ========================================================
-    # GROQ REQUEST
-    # ========================================================
 
     try:
 
@@ -688,7 +681,6 @@ DOCUMENT TEXT:
             },
         )
 
-
         response_text = (
             completion
             .choices[0]
@@ -700,15 +692,9 @@ DOCUMENT TEXT:
             f"Groq raw response: {response_text}"
         )
 
-
         result = json.loads(
             response_text
         )
-
-
-        # ====================================================
-        # CATEGORY
-        # ====================================================
 
         category = result.get(
             "category",
@@ -719,11 +705,6 @@ DOCUMENT TEXT:
 
             category = "Other"
 
-
-        # ====================================================
-        # GROQ CONFIDENCE
-        # ====================================================
-
         try:
 
             confidence_hint = float(
@@ -733,13 +714,9 @@ DOCUMENT TEXT:
                 )
             )
 
-        except (
-            TypeError,
-            ValueError
-        ):
+        except (TypeError, ValueError):
 
             confidence_hint = 0.5
-
 
         confidence_hint = max(
             0.0,
@@ -748,11 +725,6 @@ DOCUMENT TEXT:
                 confidence_hint
             )
         )
-
-
-        # ====================================================
-        # ACTION ITEMS
-        # ====================================================
 
         action_items = result.get(
             "action_items",
@@ -763,13 +735,7 @@ DOCUMENT TEXT:
             action_items,
             list
         ):
-
             action_items = []
-
-
-        # ====================================================
-        # EVIDENCE
-        # ====================================================
 
         evidence = result.get(
             "evidence",
@@ -780,12 +746,9 @@ DOCUMENT TEXT:
             evidence,
             list
         ):
-
             evidence = []
 
-
         return {
-
             "category": category,
 
             "summary": result.get(
@@ -805,7 +768,6 @@ DOCUMENT TEXT:
             "confidence_hint": confidence_hint,
         }
 
-
     except Exception as error:
 
         print(
@@ -813,7 +775,6 @@ DOCUMENT TEXT:
         )
 
         return {
-
             "category": "Other",
 
             "summary": (
@@ -834,7 +795,7 @@ DOCUMENT TEXT:
 
 
 # ============================================================
-# MATHEMATICAL EVIDENCE PROBABILITIES
+# MATHEMATICAL EVIDENCE MODEL
 # ============================================================
 
 def calculate_evidence_probabilities(
@@ -842,38 +803,34 @@ def calculate_evidence_probabilities(
     predicted_category
 ):
     """
-    Calculate deterministic evidence probabilities.
+    Calculate a normalized probability distribution over all
+    document categories using deterministic document evidence.
 
-    KMRL categories receive:
+    This is independent of Groq's confidence.
 
-        40% KMRL relevance
-        60% category-specific evidence
+    Returns:
 
-    Other receives:
-
-        60% lack of KMRL evidence
-        40% lack of category evidence
+        probabilities
+        evidence_strength
+        diagnostic_information
     """
 
     kmrl_strength, kmrl_matches = (
         kmrl_relevance_strength(text)
     )
 
-
     raw_scores = {}
 
     category_diagnostics = {}
 
-
-    # ========================================================
-    # KMRL CATEGORY SCORES
-    # ========================================================
+    # --------------------------------------------------------
+    # Calculate evidence for every category.
+    # --------------------------------------------------------
 
     for category in CATEGORIES:
 
         if category == "Other":
             continue
-
 
         category_strength, category_matches = (
             category_keyword_strength(
@@ -882,7 +839,14 @@ def calculate_evidence_probabilities(
             )
         )
 
-
+        # KMRL relevance matters for KMRL categories.
+        #
+        # Example:
+        #
+        # "maintenance" alone is weak.
+        #
+        # "KMRL" + "maintenance" is much stronger.
+        #
         kmrl_component = (
             0.40 * kmrl_strength
         )
@@ -891,34 +855,36 @@ def calculate_evidence_probabilities(
             0.60 * category_strength
         )
 
-
         score = (
             kmrl_component
             + category_component
         )
 
-
         raw_scores[category] = score
 
-
         category_diagnostics[category] = {
-
-            "category_strength":
-                category_strength,
-
-            "category_matches":
-                category_matches,
+            "category_strength": (
+                category_strength
+            ),
+            "category_matches": (
+                category_matches
+            ),
         }
 
-
-    # ========================================================
-    # STRONGEST KMRL CATEGORY
-    # ========================================================
+    # --------------------------------------------------------
+    # Calculate Other evidence.
+    #
+    # Other is stronger when:
+    #
+    # 1. KMRL evidence is weak
+    # 2. All KMRL category evidence is weak
+    #
+    # This is intentionally conservative.
+    # --------------------------------------------------------
 
     kmrl_category_scores = list(
         raw_scores.values()
     )
-
 
     if kmrl_category_scores:
 
@@ -930,28 +896,10 @@ def calculate_evidence_probabilities(
 
         strongest_kmrl_score = 0.0
 
-
-    # ========================================================
-    # OTHER SCORE
-    # ========================================================
-
     other_score = (
-
-        0.60
-        * (
-            1.0
-            - kmrl_strength
-        )
-
-        +
-
-        0.40
-        * (
-            1.0
-            - strongest_kmrl_score
-        )
+        0.55 * (1.0 - kmrl_strength)
+        + 0.45 * (1.0 - strongest_kmrl_score)
     )
-
 
     other_score = max(
         0.0,
@@ -961,77 +909,45 @@ def calculate_evidence_probabilities(
         )
     )
 
+    raw_scores["Other"] = other_score
 
-    raw_scores["Other"] = (
-        other_score
-    )
-
-
-    # ========================================================
-    # NORMALIZED PROBABILITIES
-    # ========================================================
+    # --------------------------------------------------------
+    # Convert raw evidence scores into probabilities.
+    # --------------------------------------------------------
 
     probabilities = softmax(
         raw_scores,
         temperature=0.50
     )
 
+    # --------------------------------------------------------
+    # Evidence strength
+    # --------------------------------------------------------
+    #
+    # We measure how much concrete evidence exists in the
+    # document rather than simply trusting the winning score.
+    # --------------------------------------------------------
 
-    # ========================================================
-    # PREDICTED CATEGORY EVIDENCE
-    # ========================================================
-
-    if predicted_category == "Other":
-
-        predicted_category_strength = 0.0
-        predicted_matches = []
-
-    else:
-
-        predicted_category_strength, predicted_matches = (
-            category_keyword_strength(
-                text,
-                predicted_category
-            )
+    predicted_category_strength, predicted_matches = (
+        category_keyword_strength(
+            text,
+            predicted_category
         )
-
-
-    # ========================================================
-    # EVIDENCE STRENGTH
-    # ========================================================
+    )
 
     if predicted_category == "Other":
 
         evidence_strength = (
-
-            0.60
-            * (
-                1.0
-                - kmrl_strength
-            )
-
-            +
-
-            0.40
-            * (
-                1.0
-                - strongest_kmrl_score
-            )
+            0.60 * (1.0 - kmrl_strength)
+            + 0.40 * (1.0 - strongest_kmrl_score)
         )
 
     else:
 
         evidence_strength = (
-
-            0.50
-            * kmrl_strength
-
-            +
-
-            0.50
-            * predicted_category_strength
+            0.50 * kmrl_strength
+            + 0.50 * predicted_category_strength
         )
-
 
     evidence_strength = max(
         0.0,
@@ -1041,37 +957,25 @@ def calculate_evidence_probabilities(
         )
     )
 
-
     diagnostics = {
-
-        "kmrl_matches":
-            kmrl_matches,
-
-        "kmrl_strength":
-            kmrl_strength,
-
-        "predicted_category_matches":
-            predicted_matches,
-
-        "predicted_category_strength":
-            predicted_category_strength,
-
-        "strongest_kmrl_score":
-            strongest_kmrl_score,
-
-        "raw_scores":
-            raw_scores,
-
-        "probabilities":
-            probabilities,
-
-        "evidence_strength":
-            evidence_strength,
-
-        "category_diagnostics":
-            category_diagnostics,
+        "kmrl_matches": kmrl_matches,
+        "kmrl_strength": kmrl_strength,
+        "predicted_category_matches": (
+            predicted_matches
+        ),
+        "predicted_category_strength": (
+            predicted_category_strength
+        ),
+        "strongest_kmrl_score": (
+            strongest_kmrl_score
+        ),
+        "raw_scores": raw_scores,
+        "probabilities": probabilities,
+        "evidence_strength": evidence_strength,
+        "category_diagnostics": (
+            category_diagnostics
+        ),
     }
-
 
     return (
         probabilities,
@@ -1081,7 +985,7 @@ def calculate_evidence_probabilities(
 
 
 # ============================================================
-# FINAL CONFIDENCE
+# FINAL ADAPTIVE CONFIDENCE
 # ============================================================
 
 def calculate_final_confidence(
@@ -1089,70 +993,45 @@ def calculate_final_confidence(
     groq_result
 ):
     """
-    Calculate final confidence by combining:
+    Combine:
 
-        deterministic evidence
-        +
-        Groq semantic confidence
+        1. Mathematical evidence probability
+        2. Groq semantic confidence
 
-    The weighting adapts to evidence strength.
+    using an adaptive weight.
 
     Evidence weight:
 
-        0.30 + (0.50 × evidence_strength)
+        0.30 + (0.50 * evidence_strength)
 
     Therefore:
 
-        weak evidence
-            30% evidence
-            70% Groq
+        evidence_strength = 0.0
+            -> 30% evidence / 70% Groq
 
-        strong evidence
-            80% evidence
-            20% Groq
+        evidence_strength = 0.5
+            -> 55% evidence / 45% Groq
+
+        evidence_strength = 1.0
+            -> 80% evidence / 20% Groq
     """
 
     predicted_category = (
-        groq_result.get(
-            "category",
-            "Other"
-        )
+        groq_result["category"]
     )
-
-
-    # ========================================================
-    # GROQ CONFIDENCE
-    # ========================================================
-
-    try:
-
-        groq_confidence = float(
-            groq_result.get(
-                "confidence_hint",
-                0.5
-            )
-        )
-
-    except (
-        TypeError,
-        ValueError
-    ):
-
-        groq_confidence = 0.5
-
 
     groq_confidence = max(
         0.0,
         min(
             1.0,
-            groq_confidence
+            float(
+                groq_result.get(
+                    "confidence_hint",
+                    0.5
+                )
+            )
         )
     )
-
-
-    # ========================================================
-    # MATHEMATICAL EVIDENCE
-    # ========================================================
 
     (
         evidence_probabilities,
@@ -1163,7 +1042,6 @@ def calculate_final_confidence(
         predicted_category
     )
 
-
     evidence_confidence = (
         evidence_probabilities.get(
             predicted_category,
@@ -1171,112 +1049,34 @@ def calculate_final_confidence(
         )
     )
 
-
-    # ========================================================
-    # SPECIAL HANDLING FOR "OTHER"
-    # ========================================================
-    #
-    # This is important.
-    #
-    # "Other" is not a normal KMRL category.
-    #
-    # For Other, we care about the direct absence of
-    # KMRL evidence much more than softmax competition.
-    #
-    # This prevents Form-6 from being artificially pushed
-    # down simply because eight categories are competing.
-    # ========================================================
-
-    if predicted_category == "Other":
-
-        kmrl_strength = diagnostics[
-            "kmrl_strength"
-        ]
-
-        strongest_kmrl_score = diagnostics[
-            "strongest_kmrl_score"
-        ]
-
-
-        other_direct_evidence = (
-
-            0.60
-            * (
-                1.0
-                - kmrl_strength
-            )
-
-            +
-
-            0.40
-            * (
-                1.0
-                - strongest_kmrl_score
-            )
-        )
-
-
-        other_direct_evidence = max(
-            0.0,
-            min(
-                1.0,
-                other_direct_evidence
-            )
-        )
-
-
-        evidence_confidence = (
-            other_direct_evidence
-        )
-
-
-    # ========================================================
-    # ADAPTIVE WEIGHT
-    # ========================================================
+    # --------------------------------------------------------
+    # Adaptive weighting.
+    # --------------------------------------------------------
 
     evidence_weight = (
-
         0.30
-
-        +
-
-        (
+        + (
             0.50
             * evidence_strength
         )
     )
-
-
-    evidence_weight = max(
-        0.30,
-        min(
-            0.80,
-            evidence_weight
-        )
-    )
-
 
     groq_weight = (
         1.0
         - evidence_weight
     )
 
-
-    # ========================================================
-    # FINAL CONFIDENCE
-    # ========================================================
+    # --------------------------------------------------------
+    # Final weighted confidence.
+    # --------------------------------------------------------
 
     final_confidence = (
-
         evidence_weight
         * evidence_confidence
-
         +
-
         groq_weight
         * groq_confidence
     )
-
 
     final_confidence = max(
         0.0,
@@ -1286,10 +1086,9 @@ def calculate_final_confidence(
         )
     )
 
-
-    # ========================================================
-    # DEBUG OUTPUT
-    # ========================================================
+    # --------------------------------------------------------
+    # Logging for debugging.
+    # --------------------------------------------------------
 
     print(
         "\n========== CONFIDENCE ANALYSIS =========="
@@ -1334,7 +1133,6 @@ def calculate_final_confidence(
         "==========================================\n"
     )
 
-
     return final_confidence
 
 
@@ -1344,19 +1142,18 @@ def calculate_final_confidence(
 
 def analyze_document(text):
     """
-    Complete analysis pipeline.
+    Complete AI analysis pipeline.
 
-    1. OCR provides the document text.
-    2. Groq performs semantic classification.
-    3. Deterministic evidence is calculated.
-    4. Evidence and Groq confidence are combined.
-    5. Final confidence is returned.
+    1. Groq performs semantic classification.
+    2. Deterministic evidence is calculated from OCR text.
+    3. Evidence probabilities are normalized using softmax.
+    4. Evidence strength determines the adaptive weights.
+    5. Evidence confidence and Groq confidence are combined.
     """
 
     groq_result = analyze_with_groq(
         text
     )
-
 
     final_confidence = (
         calculate_final_confidence(
@@ -1365,83 +1162,76 @@ def analyze_document(text):
         )
     )
 
-
     return {
+        "category": groq_result["category"],
 
-        "category":
-            groq_result["category"],
+        "summary": groq_result["summary"],
 
-        "summary":
-            groq_result["summary"],
+        "action_items": (
+            groq_result["action_items"]
+        ),
 
-        "action_items":
-            groq_result["action_items"],
+        "deadline": (
+            groq_result["deadline"]
+        ),
 
-        "deadline":
-            groq_result["deadline"],
-
-        "confidence":
-            final_confidence,
+        "confidence": final_confidence,
     }
 
 
 # ============================================================
-# PDF COMPATIBILITY FUNCTION
+# BACKWARD-COMPATIBLE PDF PROCESSING
 # ============================================================
 
 def process_pdf(pdf_path):
     """
-    Backward-compatible PDF processing function.
+    Existing compatibility function.
+
+    This allows the rest of the project to continue calling
+    process_pdf() if needed.
     """
 
     print(
         f"Processing: {pdf_path}"
     )
 
-
     pages = get_page_count(
         pdf_path
     )
-
 
     print(
         f"Pages: {pages}"
     )
 
-
     text = extract_text_from_pdf(
         pdf_path
     )
-
 
     print(
         f"Extracted text length: "
         f"{len(text)}"
     )
 
-
     analysis = analyze_document(
         text
     )
 
-
     return {
+        "category": analysis["category"],
 
-        "category":
-            analysis["category"],
+        "summary": analysis["summary"],
 
-        "summary":
-            analysis["summary"],
+        "action_items": (
+            analysis["action_items"]
+        ),
 
-        "action_items":
-            analysis["action_items"],
+        "deadline": (
+            analysis["deadline"]
+        ),
 
-        "deadline":
-            analysis["deadline"],
+        "pages": pages,
 
-        "pages":
-            pages,
-
-        "confidence":
-            analysis["confidence"],
+        "confidence": (
+            analysis["confidence"]
+        ),
     }
