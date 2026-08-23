@@ -35,7 +35,7 @@ from process import (
 
 app = FastAPI(
     title="KMRL Document Intelligence API",
-    version="1.0.0"
+    version="2.0.0",
 )
 
 
@@ -56,12 +56,11 @@ app.add_middleware(
 # DIRECTORIES
 # ============================================================
 
-UPLOAD_DIR = "uploads"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+BUG_FILE = os.path.join(BASE_DIR, "bugs.csv")
 
-os.makedirs(
-    UPLOAD_DIR,
-    exist_ok=True
-)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 # ============================================================
@@ -78,10 +77,9 @@ init_search_db()
 
 @app.get("/")
 def home():
-
     return {
         "message": "KMRL Backend is running!",
-        "status": "online"
+        "status": "online",
     }
 
 
@@ -99,28 +97,19 @@ def log_bug(
     deadline_expected=None,
     deadline_actual=None,
     file_type=None,
+    status="Unfixed",
 ):
-    """
-    Automatically logs bugs to bugs.csv.
-    """
-
-    csv_file = "bugs.csv"
-
-    file_exists = os.path.isfile(
-        csv_file
-    )
+    file_exists = os.path.isfile(BUG_FILE)
 
     with open(
-        csv_file,
+        BUG_FILE,
         mode="a",
         newline="",
-        encoding="utf-8"
+        encoding="utf-8",
     ) as file:
-
         writer = csv.writer(file)
 
         if not file_exists:
-
             writer.writerow([
                 "Timestamp",
                 "Document Name",
@@ -139,26 +128,16 @@ def log_bug(
             datetime.now().strftime(
                 "%Y-%m-%d %H:%M:%S"
             ),
-
             document_name,
-
             file_type or "Unknown",
-
             category_expected or "N/A",
-
             category_actual or "N/A",
-
             action_items_expected or "N/A",
-
             action_items_actual or "N/A",
-
             deadline_expected or "N/A",
-
             deadline_actual or "N/A",
-
             error_description,
-
-            "Unfixed",
+            status,
         ])
 
 
@@ -168,19 +147,12 @@ def log_bug(
 
 @app.post("/upload")
 async def upload_file(
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
 ):
-
     file_path = None
 
     try:
-
-        # ----------------------------------------------------
-        # Validate filename
-        # ----------------------------------------------------
-
         if not file.filename:
-
             return {
                 "error": "No filename provided."
             }
@@ -193,16 +165,15 @@ async def upload_file(
             filename
         )[1].lower()
 
-        allowed_extensions = [
+        allowed_extensions = {
             ".pdf",
             ".png",
             ".jpg",
             ".jpeg",
-            ".docx"
-        ]
+            ".docx",
+        }
 
         if ext not in allowed_extensions:
-
             return {
                 "error": (
                     f"Unsupported file type: {ext}. "
@@ -210,23 +181,18 @@ async def upload_file(
                 )
             }
 
-        # ----------------------------------------------------
-        # Save file
-        # ----------------------------------------------------
-
         file_path = os.path.join(
             UPLOAD_DIR,
-            filename
+            filename,
         )
 
         with open(
             file_path,
-            "wb"
+            "wb",
         ) as buffer:
-
             shutil.copyfileobj(
                 file.file,
-                buffer
+                buffer,
             )
 
         print(
@@ -234,87 +200,92 @@ async def upload_file(
         )
 
         # ----------------------------------------------------
-        # EXTRACT TEXT
+        # EXTRACTION
         # ----------------------------------------------------
 
         if ext == ".pdf":
-
             pages = get_page_count(
                 file_path
             )
-
             extracted_text = extract_text_from_pdf(
                 file_path
             )
 
-        elif ext in [
+        elif ext in {
             ".png",
             ".jpg",
-            ".jpeg"
-        ]:
-
+            ".jpeg",
+        }:
             pages = 1
-
             extracted_text = extract_text_from_image(
                 file_path
             )
 
         elif ext == ".docx":
-
             pages = 1
-
             extracted_text = extract_text_from_docx(
                 file_path
             )
 
         else:
-
-            return {
-                "error": "Unsupported file."
-            }
+            pages = 0
+            extracted_text = ""
 
         # ----------------------------------------------------
-        # OCR FAILURE
+        # NEVER TURN AN EMPTY EXTRACTION INTO A CRASH.
         # ----------------------------------------------------
 
-        if (
-            not extracted_text
-            or
-            not extracted_text.strip()
-        ):
+        if not extracted_text or not extracted_text.strip():
+            extracted_text = (
+                "[No readable text was extracted. "
+                "The file itself has been saved for download.]"
+            )
 
             log_bug(
                 document_name=filename,
                 error_description=(
-                    "No text could be extracted "
-                    "from the file."
+                    "Text extraction returned no readable text."
                 ),
-                file_type=ext.upper().replace(
-                    ".",
-                    ""
-                )
+                file_type=ext.replace(".", "").upper(),
+                status="Partial",
+            )
+
+            # Still save the document so the API never responds
+            # with a fake successful AI analysis.
+            doc_id = save_to_db(
+                filename=filename,
+                category="Other",
+                summary=(
+                    "The document was saved, but no readable "
+                    "text could be extracted automatically."
+                ),
+                action_items=[],
+                deadline="No deadline specified",
+                pages=pages,
+                confidence=0.0,
+                file_path=file_path,
+                extracted_text=extracted_text,
             )
 
             return {
-                "id": None,
+                "id": doc_id,
                 "filename": filename,
                 "category": "Other",
                 "summary": (
-                    "No readable text could be "
-                    "extracted from this document."
+                    "The document was saved, but no readable "
+                    "text could be extracted automatically."
                 ),
                 "action_items": [],
                 "deadline": "No deadline specified",
                 "pages": pages,
                 "confidence": 0.0,
-                "analysis_failed": True,
-                "error": (
-                    "OCR/text extraction failed."
-                )
+                "analysis_failed": False,
+                "partial_analysis": True,
+                "error": None,
             }
 
         # ----------------------------------------------------
-        # AI ANALYSIS
+        # AI + EVIDENCE ANALYSIS
         # ----------------------------------------------------
 
         print(
@@ -325,111 +296,84 @@ async def upload_file(
             extracted_text
         )
 
-        confidence = analysis.get(
-            "confidence",
-            0.0
+        confidence = float(
+            analysis.get(
+                "confidence",
+                0.0,
+            )
         )
 
         category = analysis.get(
             "category",
-            "Other"
+            "Other",
         )
 
         action_items = analysis.get(
             "action_items",
-            []
+            [],
         )
 
         deadline = analysis.get(
             "deadline",
-            "No deadline specified"
+            "No deadline specified",
         )
 
         summary = analysis.get(
             "summary",
-            "No summary provided."
+            "No summary provided.",
         )
 
-        analysis_failed = analysis.get(
-            "analysis_failed",
-            False
-        )
-
-        analysis_error = analysis.get(
-            "error"
+        partial_analysis = bool(
+            analysis.get(
+                "partial_analysis",
+                False,
+            )
         )
 
         # ----------------------------------------------------
-        # AI FAILURE
-        #
-        # IMPORTANT:
-        # Do NOT save failed AI analysis as a normal document.
+        # PARTIAL ANALYSIS IS NOT A HARD FAILURE.
         # ----------------------------------------------------
 
-        if analysis_failed:
-
+        if partial_analysis:
             log_bug(
                 document_name=filename,
                 error_description=(
-                    f"AI analysis failed: "
-                    f"{analysis_error or 'Unknown error'}"
+                    "One or more AI chunks were unavailable; "
+                    "document was completed using successful "
+                    "chunks plus local evidence fallback."
                 ),
                 category_actual=category,
-                action_items_actual=str(
-                    action_items
-                ),
+                action_items_actual=str(action_items),
                 deadline_actual=deadline,
-                file_type=ext.upper().replace(
-                    ".",
-                    ""
-                )
+                file_type=ext.replace(".", "").upper(),
+                status="Partial",
             )
 
-            return {
-                "id": None,
-                "filename": filename,
-                "category": category,
-                "summary": summary,
-                "action_items": action_items,
-                "deadline": deadline,
-                "pages": pages,
-                "confidence": confidence,
-                "analysis_failed": True,
-                "error": analysis_error
-            }
-
         # ----------------------------------------------------
-        # LOW CONFIDENCE BUG
+        # LOW CONFIDENCE
         # ----------------------------------------------------
 
         if confidence < 0.5:
-
             log_bug(
                 document_name=filename,
                 error_description=(
-                    f"Low confidence score: "
-                    f"{confidence}"
+                    f"Low confidence score: {confidence}"
                 ),
                 category_actual=category,
-                action_items_actual=str(
-                    action_items
-                ),
+                action_items_actual=str(action_items),
                 deadline_actual=deadline,
-                file_type=ext.upper().replace(
-                    ".",
-                    ""
-                )
+                file_type=ext.replace(".", "").upper(),
+                status="Unfixed",
             )
 
         # ----------------------------------------------------
-        # OTHER CATEGORY BUG
+        # OTHER CATEGORY
         # ----------------------------------------------------
 
-        if category in [
+        if category in {
             "Other",
-            "General"
-        ]:
-
+            "General",
+        }:
             log_bug(
                 document_name=filename,
                 error_description=(
@@ -437,26 +381,20 @@ async def upload_file(
                     "'Other' or 'General'."
                 ),
                 category_actual=category,
-                action_items_actual=str(
-                    action_items
-                ),
+                action_items_actual=str(action_items),
                 deadline_actual=deadline,
-                file_type=ext.upper().replace(
-                    ".",
-                    ""
-                )
+                file_type=ext.replace(".", "").upper(),
+                status="Unfixed",
             )
 
         # ----------------------------------------------------
-        # POSSIBLE ACTION ITEM BUG
+        # POSSIBLE ACTION ITEM ISSUE
         # ----------------------------------------------------
 
         if (
             action_items == []
-            and
-            confidence > 0.8
+            and confidence > 0.8
         ):
-
             log_bug(
                 document_name=filename,
                 error_description=(
@@ -466,14 +404,12 @@ async def upload_file(
                 category_actual=category,
                 action_items_actual="[]",
                 deadline_actual=deadline,
-                file_type=ext.upper().replace(
-                    ".",
-                    ""
-                )
+                file_type=ext.replace(".", "").upper(),
+                status="Unfixed",
             )
 
         # ----------------------------------------------------
-        # SAVE DATABASE
+        # SAVE
         # ----------------------------------------------------
 
         doc_id = save_to_db(
@@ -488,20 +424,12 @@ async def upload_file(
             extracted_text=extracted_text,
         )
 
-        # ----------------------------------------------------
-        # SEARCH INDEX
-        # ----------------------------------------------------
-
         index_document(
             doc_id,
             filename,
             category,
             summary,
         )
-
-        # ----------------------------------------------------
-        # SUCCESS
-        # ----------------------------------------------------
 
         print(
             f"✅ Document processed successfully. "
@@ -518,35 +446,39 @@ async def upload_file(
             "pages": pages,
             "confidence": confidence,
             "analysis_failed": False,
-            "error": None
+            "partial_analysis": partial_analysis,
+            "error": None,
         }
 
     except Exception as e:
-
         print(
             f"❌ Upload error: {e}"
         )
 
-        log_bug(
-            document_name=(
-                file.filename
-                if file and file.filename
-                else "Unknown"
-            ),
-            error_description=(
-                f"Server error: {str(e)}"
-            ),
-            file_type=(
-                os.path.splitext(
+        try:
+            log_bug(
+                document_name=(
                     file.filename
-                )[1].upper().replace(
-                    ".",
-                    ""
-                )
-                if file and file.filename
-                else "Unknown"
+                    if file and file.filename
+                    else "Unknown"
+                ),
+                error_description=(
+                    f"Server error: {str(e)}"
+                ),
+                file_type=(
+                    os.path.splitext(
+                        file.filename
+                    )[1].replace(
+                        ".",
+                        "",
+                    ).upper()
+                    if file and file.filename
+                    else "Unknown"
+                ),
+                status="Unfixed",
             )
-        )
+        except Exception:
+            pass
 
         return {
             "id": None,
@@ -556,13 +488,17 @@ async def upload_file(
                 else None
             ),
             "category": "Other",
-            "summary": "Document processing failed.",
+            "summary": (
+                "The server encountered an error while "
+                "processing this document."
+            ),
             "action_items": [],
             "deadline": "No deadline specified",
             "pages": 0,
             "confidence": 0.0,
             "analysis_failed": True,
-            "error": str(e)
+            "partial_analysis": False,
+            "error": str(e),
         }
 
 
@@ -572,7 +508,6 @@ async def upload_file(
 
 @app.get("/search")
 def search_docs(q: str):
-
     results = search_documents(q)
 
     return {
@@ -588,28 +523,24 @@ def search_docs(q: str):
 
 @app.get("/bugs")
 def view_bugs():
-
-    if not os.path.isfile("bugs.csv"):
-
+    if not os.path.isfile(BUG_FILE):
         return {
             "total_bugs": 0,
-            "bugs": []
+            "bugs": [],
         }
 
     with open(
-        "bugs.csv",
+        BUG_FILE,
         "r",
-        encoding="utf-8"
+        encoding="utf-8",
     ) as file:
-
         reader = csv.reader(file)
-
         data = list(reader)
 
     return {
         "total_bugs": max(
             0,
-            len(data) - 1
+            len(data) - 1,
         ),
         "bugs": data,
     }
@@ -621,7 +552,6 @@ def view_bugs():
 
 @app.get("/documents")
 def get_all_documents():
-
     documents = get_documents()
 
     return {
@@ -630,21 +560,15 @@ def get_all_documents():
     }
 
 
-# ============================================================
-# SINGLE DOCUMENT
-# ============================================================
-
 @app.get("/documents/{doc_id}")
 def get_single_document(
-    doc_id: int
+    doc_id: int,
 ):
-
     document = get_document(
         doc_id
     )
 
     if document is None:
-
         return {
             "error": "Document not found"
         }
@@ -653,12 +577,11 @@ def get_single_document(
 
 
 # ============================================================
-# STATISTICS
+# STATS
 # ============================================================
 
 @app.get("/stats")
 def document_stats():
-
     return get_stats()
 
 
@@ -668,23 +591,21 @@ def document_stats():
 
 @app.delete("/documents/{doc_id}")
 def remove_document(
-    doc_id: int
+    doc_id: int,
 ):
-
     deleted = delete_document(
         doc_id
     )
 
     if not deleted:
-
         return {
             "success": False,
-            "error": "Document not found"
+            "error": "Document not found",
         }
 
     return {
         "success": True,
-        "message": "Document deleted successfully"
+        "message": "Document deleted successfully",
     }
 
 
@@ -696,15 +617,13 @@ def remove_document(
     "/documents/{doc_id}/download"
 )
 def download_document(
-    doc_id: int
+    doc_id: int,
 ):
-
     document = get_document(
         doc_id
     )
 
     if document is None:
-
         return {
             "error": "Document not found"
         }
@@ -715,10 +634,8 @@ def download_document(
 
     if (
         not file_path
-        or
-        not os.path.exists(file_path)
+        or not os.path.exists(file_path)
     ):
-
         return {
             "error": "File not found"
         }
@@ -735,7 +652,7 @@ def download_document(
         ".docx": (
             "application/vnd.openxmlformats-"
             "officedocument.wordprocessingml.document"
-        )
+        ),
     }
 
     return FileResponse(
@@ -743,6 +660,6 @@ def download_document(
         filename=document["filename"],
         media_type=media_types.get(
             extension,
-            "application/octet-stream"
-        )
+            "application/octet-stream",
+        ),
     )

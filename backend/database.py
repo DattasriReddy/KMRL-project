@@ -1,8 +1,22 @@
 import sqlite3
 import json
+import os
 
 
-DATABASE = "kmrl.db"
+# Keep the database beside this Python file, regardless of where
+# uvicorn is started from.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATABASE = os.path.join(BASE_DIR, "kmrl.db")
+
+
+# ============================================================
+# CONNECTION
+# ============================================================
+
+def get_connection():
+    conn = sqlite3.connect(DATABASE)
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
 
 
 # ============================================================
@@ -10,11 +24,7 @@ DATABASE = "kmrl.db"
 # ============================================================
 
 def init_db():
-
-    conn = sqlite3.connect(
-        DATABASE
-    )
-
+    conn = get_connection()
     c = conn.cursor()
 
     c.execute("""
@@ -49,18 +59,13 @@ def save_to_db(
     pages,
     confidence,
     file_path,
-    extracted_text
+    extracted_text,
 ):
-
-    conn = sqlite3.connect(
-        DATABASE
-    )
-
+    conn = get_connection()
     c = conn.cursor()
 
     c.execute("""
-        INSERT INTO documents
-        (
+        INSERT INTO documents (
             filename,
             category,
             summary,
@@ -77,14 +82,14 @@ def save_to_db(
         category,
         summary,
         json.dumps(
-            action_items,
-            ensure_ascii=False
+            action_items or [],
+            ensure_ascii=False,
         ),
         deadline,
         pages,
         confidence,
         file_path,
-        extracted_text
+        extracted_text,
     ))
 
     doc_id = c.lastrowid
@@ -100,13 +105,7 @@ def save_to_db(
 # ============================================================
 
 def init_search_db():
-
-    """
-    No-op.
-
-    We use SQLite LIKE search.
-    """
-
+    # We intentionally use SQLite LIKE search.
     pass
 
 
@@ -114,16 +113,9 @@ def index_document(
     doc_id,
     filename,
     category,
-    summary
+    summary,
 ):
-
-    """
-    No-op.
-
-    SQLite LIKE search does not require
-    a separate search index.
-    """
-
+    # No separate index is needed for LIKE search.
     pass
 
 
@@ -132,17 +124,12 @@ def index_document(
 # ============================================================
 
 def search_documents(query):
-
-    conn = sqlite3.connect(
-        DATABASE
-    )
-
+    conn = get_connection()
     c = conn.cursor()
 
     search_term = f"%{query}%"
 
-    c.execute(
-        """
+    c.execute("""
         SELECT
             id,
             filename,
@@ -158,33 +145,27 @@ def search_documents(query):
             OR extracted_text LIKE ?
         ORDER BY id DESC
         LIMIT 20
-        """,
-        (
-            search_term,
-            search_term,
-            search_term,
-            search_term
-        )
-    )
+    """, (
+        search_term,
+        search_term,
+        search_term,
+        search_term,
+    ))
 
-    results = c.fetchall()
-
+    rows = c.fetchall()
     conn.close()
 
-    documents = []
-
-    for row in results:
-
-        documents.append({
+    return [
+        {
             "id": row[0],
             "filename": row[1],
             "category": row[2],
             "summary": row[3],
             "pages": row[4],
-            "confidence": row[5]
-        })
-
-    return documents
+            "confidence": row[5],
+        }
+        for row in rows
+    ]
 
 
 # ============================================================
@@ -192,11 +173,7 @@ def search_documents(query):
 # ============================================================
 
 def get_documents():
-
-    conn = sqlite3.connect(
-        DATABASE
-    )
-
+    conn = get_connection()
     c = conn.cursor()
 
     c.execute("""
@@ -212,7 +189,6 @@ def get_documents():
     """)
 
     rows = c.fetchall()
-
     conn.close()
 
     return [
@@ -233,11 +209,7 @@ def get_documents():
 # ============================================================
 
 def get_document(doc_id):
-
-    conn = sqlite3.connect(
-        DATABASE
-    )
-
+    conn = get_connection()
     c = conn.cursor()
 
     c.execute("""
@@ -254,28 +226,18 @@ def get_document(doc_id):
             extracted_text
         FROM documents
         WHERE id = ?
-    """, (
-        doc_id,
-    ))
+    """, (doc_id,))
 
     row = c.fetchone()
-
     conn.close()
 
     if row is None:
-
         return None
 
     try:
-
-        action_items = json.loads(
-            row[4]
-        )
-
+        action_items = json.loads(row[4] or "[]")
     except Exception:
-
         action_items = []
-
 
     return {
         "id": row[0],
@@ -296,26 +258,15 @@ def get_document(doc_id):
 # ============================================================
 
 def delete_document(doc_id):
-
-    conn = sqlite3.connect(
-        DATABASE
-    )
-
+    conn = get_connection()
     c = conn.cursor()
 
     c.execute(
-        """
-        DELETE FROM documents
-        WHERE id = ?
-        """,
-        (
-            doc_id,
-        )
+        "DELETE FROM documents WHERE id = ?",
+        (doc_id,),
     )
 
-    deleted = (
-        c.rowcount > 0
-    )
+    deleted = c.rowcount > 0
 
     conn.commit()
     conn.close()
@@ -328,17 +279,10 @@ def delete_document(doc_id):
 # ============================================================
 
 def get_stats():
-
-    conn = sqlite3.connect(
-        DATABASE
-    )
-
+    conn = get_connection()
     c = conn.cursor()
 
-    c.execute(
-        "SELECT COUNT(*) FROM documents"
-    )
-
+    c.execute("SELECT COUNT(*) FROM documents")
     total = c.fetchone()[0]
 
     c.execute("""
@@ -346,7 +290,6 @@ def get_stats():
         FROM documents
         WHERE confidence IS NOT NULL
     """)
-
     processed = c.fetchone()[0]
 
     conn.close()
