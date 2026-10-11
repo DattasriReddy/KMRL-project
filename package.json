@@ -1,0 +1,13 @@
+{
+  "name": "kmrl-project",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"cd backend && uvicorn main:app --reload\" \"cd frontend && npm run dev\"",
+    "backend": "cd backend && uvicorn main:app --reload",
+    "frontend": "cd frontend && npm run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

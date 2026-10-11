@@ -33,11 +33,7 @@ export default function Home() {
       }
 
       const data = await response.json();
-
       setResult(data);
-      setTimeout(() => {
-        router.push("/dashboard");
-      }, 1000);
     } catch (err) {
       console.error(err);
       setError("Something went wrong while processing the PDF.");
@@ -52,7 +48,6 @@ export default function Home() {
 
         {/* HERO */}
         <section className="mb-14 text-center">
-
           <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-violet-400/10 px-4 py-2 text-sm text-violet-300">
             <span>✦</span>
             AI-Powered Document Intelligence
@@ -60,16 +55,13 @@ export default function Home() {
 
           <h1 className="text-4xl font-bold tracking-tight sm:text-6xl">
             Turn documents into
-            <span className="block text-violet-400">
-              intelligence.
-            </span>
+            <span className="block text-violet-400">intelligence.</span>
           </h1>
 
           <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-white/50 sm:text-lg">
             Upload KMRL documents and let AI extract, classify and
             summarize the information that matters.
           </p>
-
         </section>
 
         {/* UPLOAD */}
@@ -97,12 +89,46 @@ export default function Home() {
         {/* RESULT */}
         {!isLoading && result && (
           <section className="mx-auto mt-8 max-w-3xl">
+            {result.partial_analysis && (
+              <div className="mb-4 rounded-xl border border-yellow-400/20 bg-yellow-400/10 p-4 text-sm text-yellow-300">
+                AI analysis was unavailable, so this result is a basic
+                keyword-based fallback.
+              </div>
+            )}
+
             <ResultCard
               category={result.category}
               summary={result.summary}
               pages={result.pages}
               confidence={result.confidence * 100}
             />
+
+            {result.deadline && (
+              <p className="mt-4 text-sm text-white/60">
+                <span className="text-violet-300">Deadline:</span>{" "}
+                {result.deadline}
+              </p>
+            )}
+
+            {result.action_items && result.action_items.length > 0 && (
+              <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4">
+                <p className="mb-2 text-sm font-semibold text-violet-300">
+                  Action items
+                </p>
+                <ul className="list-disc space-y-1 pl-5 text-sm text-white/70">
+                  {result.action_items.map((item, index) => (
+                    <li key={index}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <button
+              onClick={() => router.push("/dashboard")}
+              className="mt-6 rounded-lg bg-violet-500 px-4 py-2 text-sm font-medium text-white hover:bg-violet-400"
+            >
+              View in dashboard
+            </button>
           </section>
         )}
 
