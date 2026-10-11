@@ -7,6 +7,7 @@ from PyPDF2 import PdfReader
 from pdf2image import convert_from_path
 import pytesseract
 from dotenv import load_dotenv
+import math
 
 load_dotenv()
 
@@ -19,6 +20,41 @@ MIN_SECONDS_BETWEEN_GROQ_CALLS=0.5
 OCR_DPI=180
 MAX_LOCAL_DEADLINES=20
 MAX_LOCAL_ACTIONS=20
+
+# Module-level constant for category keywords
+CATEGORY_KEYWORDS={
+    "Tender / Bid Document":[
+        "tender","bid","procurement","submission",
+        "contract","rfp","quotation","bidding",
+    ],
+    "Maintenance Log / Work Order":[
+        "maintenance","repair","work order",
+        "track","equipment","service",
+    ],
+    "Inspection Report":[
+        "inspection","safety","audit","compliance",
+        "check","report","condition",
+    ],
+    "Incident Report":[
+        "incident","accident","near-miss",
+        "emergency","injury","damage",
+    ],
+    "Policy / Standard Operating Procedure":[
+        "policy","procedure","sop","guideline",
+        "protocol","standard",
+    ],
+    "Financial / Budget Document":[
+        "budget","financial","cost","expenditure",
+        "account","fund","estimate",
+    ],
+    "HR / Personnel Record":[
+        "employee","hr","personnel","leave",
+        "attendance","recruitment","staff",
+    ],
+    "Other":[
+        "form","application","miscellaneous","unknown",
+    ],
+}
 
 ALLOWED_CATEGORIES=[
     "Tender / Bid Document",
@@ -178,44 +214,11 @@ def extract_text_from_docx(docx_path):
 
 
 def calculate_evidence_score(text):
-    category_keywords={
-        "Tender / Bid Document":[
-            "tender","bid","procurement","submission",
-            "contract","rfp","quotation","bidding",
-        ],
-        "Maintenance Log / Work Order":[
-            "maintenance","repair","work order",
-            "track","equipment","service",
-        ],
-        "Inspection Report":[
-            "inspection","safety","audit","compliance",
-            "check","report","condition",
-        ],
-        "Incident Report":[
-            "incident","accident","near-miss",
-            "emergency","injury","damage",
-        ],
-        "Policy / Standard Operating Procedure":[
-            "policy","procedure","sop","guideline",
-            "protocol","standard",
-        ],
-        "Financial / Budget Document":[
-            "budget","financial","cost","expenditure",
-            "account","fund","estimate",
-        ],
-        "HR / Personnel Record":[
-            "employee","hr","personnel","leave",
-            "attendance","recruitment","staff",
-        ],
-        "Other":[
-            "form","application","miscellaneous","unknown",
-        ],
-    }
-
+    """Keep the original function working for evidence-override logic"""
     text_lower=text.lower()
     scores={}
 
-    for category,keywords in category_keywords.items():
+    for category,keywords in CATEGORY_KEYWORDS.items():
         score=0.40
         for keyword in keywords:
             if keyword.lower() in text_lower:
@@ -223,6 +226,180 @@ def calculate_evidence_score(text):
         scores[category]=min(score,1.0)
 
     return scores
+
+
+def calculate_evidence_profile(text):
+    """Calculate evidence profile with word-boundary matching and capping"""
+    text_lower=text.lower()
+    hits={}
+
+    # Count keyword occurrences with word-boundary regex, capped at 5 per keyword
+    for category,keywords in CATEGORY_KEYWORDS.items():
+        category_hits=0
+        for keyword in keywords:
+            # Use word-boundary regex to avoid substring matches
+            matches=re.findall(r"\b" + re.escape(keyword.lower()), text_lower)
+            # Cap each keyword's count at 5
+            category_hits+=min(len(matches), 5)
+        hits[category]=category_hits
+
+    # Calculate shares
+    total=sum(hits.values())
+    shares={}
+    if total>0:
+        for category,count in hits.items():
+            shares[category]=count/total
+    else:
+        # If no hits, all shares are 0.0
+        for category in CATEGORY_KEYWORDS.keys():
+            shares[category]=0.0
+
+    # Find top category
+    top_category=None
+    max_share=-1
+    for category,share in shares.items():
+        if share>max_share:
+            max_share=share
+            top_category=category
+
+    # Handle case where all shares are 0
+    if top_category is None:
+        top_category=list(CATEGORY_KEYWORDS.keys())[0]  # Default to first category
+
+    return {
+        "hits":hits,
+        "share":shares,
+        "top_category":top_category
+    }
+
+
+def clamp(value, min_val, max_val):
+    """Clamp a value between min and max"""
+    return max(min_val, min(max_val, value))
+
+
+def compute_confidence(final_category, profile, chunk_results, chunk_lengths, text_length):
+    """
+    Compute confidence by combining keyword evidence and Groq model agreement.
+
+    Approach (undergraduate-level mathematics):
+    1. Evidence Signal: How clearly does the winning category beat competitors?
+       - Measures the margin between top category and runner-up (normalized to 0-1)
+       - Converts to math_confidence: 0.30 + 0.65 * evidence_strength
+    2. Groq Signal: Average confidence from successful chunks, adjusted by agreement
+       - Takes mean Groq confidence (capped at 0.90)
+       - Boosts it when chunks agree on the same category
+    3. Combination:
+       - Uses geometric mean (sqrt(math*groq)) - requires both signals to be strong
+       - Applies penalty for disagreement between the two signals
+       - Adjusts for category agreement, coverage, and text length
+       - Clamps to reasonable bounds [0.05, 0.95]
+    """
+    # Get successful chunks
+    successful=[r for r in chunk_results if r.get("success")]
+
+    # Extract profile data
+    share=profile["share"]
+    hits=profile["hits"]
+    top_category=profile["top_category"]
+
+    # Calculate evidence_strength: margin of final_category over others, clamped to [0,1]
+    final_share=share.get(final_category, 0.0)
+    # Get max share among OTHER categories
+    other_shares=[share[cat] for cat in share.keys() if cat!=final_category]
+    max_other_share=max(other_shares) if other_shares else 0.0
+    margin=final_share-max_other_share
+    evidence_strength=clamp(margin/0.5, 0, 1)  # Divide by 0.5 to normalize to [0,1] range
+
+    # If no successful chunks, use fallback
+    if not successful:
+        # evidence_strength is already calculated above
+        confidence=min(0.55, 0.25+0.5*evidence_strength)
+        breakdown={
+            "evidence_strength":evidence_strength,
+            "chunk_agreement":None,
+            "groq_conf":None,
+            "methods_agree":None,
+            "coverage":0.0,
+            "raw":confidence,
+            "final":confidence
+        }
+        return (confidence, breakdown)
+
+    # Calculate chunk_agreement: length-weighted fraction of successful chunks agreeing with final_category
+    if chunk_lengths and len(chunk_lengths)==len(successful):
+        # Use provided chunk lengths
+        total_weight=sum(chunk_lengths)
+        if total_weight>0:
+            agreed_weight=sum(
+                length for i,length in enumerate(chunk_lengths)
+                if successful[i].get("category")==final_category
+            )
+            chunk_agreement=agreed_weight/total_weight if total_weight>0 else 0.0
+        else:
+            chunk_agreement=0.0
+    else:
+        # Fallback to equal weights
+        agreed_chunks=sum(
+            1 for r in successful
+            if r.get("category")==final_category
+        )
+        chunk_agreement=agreed_chunks/len(successful) if successful else 0.0
+
+    # Calculate groq_conf: mean confidence of successful chunks, clamped at 0.90, then adjusted by agreement
+    confidences=[r.get("confidence", 0.0) for r in successful]
+    mean_conf=sum(confidences)/len(confidences) if confidences else 0.0
+    groq_conf_raw=min(mean_conf, 0.90)
+    groq_conf=groq_conf_raw * (0.5 + 0.5 * chunk_agreement)
+
+    # Calculate categories_agree: 1.0 if final_category matches profile top category
+    categories_agree=1.0 if final_category==top_category else 0.0
+
+    # Calculate gap and base for final confidence calculation
+    math_conf=0.30 + 0.65 * evidence_strength
+    gap=abs(math_conf - groq_conf)
+    base=math.sqrt(math_conf * groq_conf) if (math_conf * groq_conf) > 0 else 0.0
+    confidence=base * (1 - 0.3 * gap)
+
+    # Apply category agreement penalty
+    if not categories_agree:
+        confidence=min(confidence * 0.6, 0.55)
+        needs_review=True
+    else:
+        needs_review=False
+
+    # Additional needs_review conditions
+    if gap > 0.35 or confidence < 0.50:
+        needs_review=True
+
+    # Calculate coverage
+    coverage=len(successful)/len(chunk_results) if chunk_results else 0.0
+
+    # Apply coverage factor
+    confidence=confidence * (0.5 + 0.5 * coverage)
+
+    # Apply short text penalty
+    if text_length<200:
+        confidence*=0.7
+
+    # Final clamp
+    confidence=clamp(confidence, 0.05, 0.95)
+
+    # Build breakdown
+    breakdown={
+        "evidence_strength":evidence_strength,
+        "chunk_agreement":chunk_agreement,
+        "groq_conf":groq_conf,
+        "gap":gap,
+        "categories_agree":categories_agree,
+        "coverage":coverage,
+        "raw":confidence,  # This is the final confidence after all adjustments
+        "math_conf":math_conf,
+        "groq_conf_raw":groq_conf_raw,
+        "final":confidence
+    }
+
+    return (confidence, breakdown)
 
 
 def _split_long_text(text,chunk_size,overlap):
@@ -703,13 +880,13 @@ Use a number between 0.0 and 1.0.
 
 Return ONLY this JSON structure:
 
-{{
+{
     "category":"one allowed category",
     "summary":"short factual summary",
     "action_items":[],
     "deadlines":[],
     "confidence":0.0
-}}
+}
 
 DOCUMENT CHUNK:
 
@@ -1007,13 +1184,10 @@ def analyze_with_groq(text):
             "error":"No readable text",
         }
 
-    evidence_scores=calculate_evidence_score(text)
+    # Calculate evidence profile for the full text
+    profile=calculate_evidence_profile(text)
 
-    print("\n🔬 COMPLETE DOCUMENT EVIDENCE SCORES")
-
-    for category,score in evidence_scores.items():
-        print(f"   {category}: {score:.3f}")
-
+    # Create chunks
     chunks=create_chunks(
         text,
         chunk_size=CHUNK_SIZE,
@@ -1042,12 +1216,17 @@ def analyze_with_groq(text):
 
     chunk_results=[]
 
+    # Process each chunk and collect length information
+    chunk_lengths=[]
     for chunk in chunks:
         result=analyze_chunk_with_groq(
             chunk["text"],
             chunk["chunk_number"],
             chunk["total_chunks"],
         )
+
+        # Store the chunk length for agreement calculation
+        chunk_lengths.append(len(chunk["text"]))
 
         chunk_results.append(result)
 
@@ -1079,63 +1258,8 @@ def analyze_with_groq(text):
         )
     )
 
-    evidence_for_category=evidence_scores.get(
-        groq_category,
-        0.40,
-    )
-
-    evidence_quality=min(
-        max(
-            (evidence_for_category-0.40)/0.60,
-            0.0,
-        ),
-        1.0,
-    )
-
-    evidence_weight=(
-        0.30
-        +(0.50*evidence_quality)
-    )
-
-    groq_weight=1-evidence_weight
-
-    final_confidence=(
-        (
-            evidence_weight
-            *evidence_for_category
-        )
-        +
-        (
-            groq_weight
-            *groq_confidence
-        )
-    )
-
-    print(
-        f"\n🔬 Evidence Score: "
-        f"{evidence_for_category:.3f}"
-    )
-
-    print(
-        f"🤖 Groq Confidence: "
-        f"{groq_confidence:.3f}"
-    )
-
-    print(
-        f"⚖️ Evidence Weight: "
-        f"{evidence_weight:.3f}"
-    )
-
-    print(
-        f"⚖️ Groq Weight: "
-        f"{groq_weight:.3f}"
-    )
-
-    print(
-        f"✅ Final Confidence: "
-        f"{final_confidence:.3f}"
-    )
-
+    # Evidence override logic (unchanged)
+    evidence_scores=calculate_evidence_score(text)
     best_category=max(
         evidence_scores,
         key=evidence_scores.get,
@@ -1158,15 +1282,48 @@ def analyze_with_groq(text):
     if not successful_chunks:
         final_category=best_category
 
-        final_confidence=evidence_scores.get(
-            best_category,
-            0.40,
-        )
-
         print(
             "🛡️ Groq unavailable for all chunks. "
             "Using evidence-based fallback."
         )
+
+    # Calculate confidence using the new method
+    confidence, breakdown=compute_confidence(
+        final_category=final_category,
+        profile=profile,
+        chunk_results=chunk_results,
+        chunk_lengths=chunk_lengths,
+        text_length=len(text)
+    )
+
+    # Print readable breakdown
+    print(
+        f"\n🔍 CONFIDENCE BREAKDOWN:"
+    )
+    print(
+        f"   Evidence strength: {breakdown['evidence_strength']:.3f}"
+    )
+    print(
+        f"   Chunk agreement: {breakdown['chunk_agreement']:.3f}"
+    )
+    print(
+        f"   Groq confidence: {breakdown['groq_conf']:.3f}"
+    )
+    print(
+        f"   Categories agree: {'Yes' if breakdown['categories_agree']==1.0 else 'No'}"
+    )
+    print(
+        f"   Gap: {breakdown['gap']:.3f}"
+    )
+    print(
+        f"   Coverage: {breakdown['coverage']:.3f}"
+    )
+    print(
+        f"   Raw confidence: {breakdown['raw']:.3f}"
+    )
+    print(
+        f"   Final confidence: {breakdown['final']:.3f}"
+    )
 
     partial_analysis=(
         len(successful_chunks)<len(chunks)
@@ -1189,7 +1346,7 @@ def analyze_with_groq(text):
         "confidence":max(
             0.0,
             min(
-                float(final_confidence),
+                float(confidence),
                 1.0,
             ),
         ),
@@ -1227,7 +1384,7 @@ def process_pdf(pdf_path):
         f"📌 Action items: "
         f"{len(analysis['action_items'])}"
     )
-    print(f"📅 Deadline: {analysis['deadline']}")
+    print(f"�5 Deadline: {analysis['deadline']}")
     print(
         f"⚠️ Partial analysis: "
         f"{analysis.get('partial_analysis',False)}"
