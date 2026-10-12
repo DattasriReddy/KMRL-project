@@ -7,7 +7,8 @@ import DocumentCard from "../../components/DocumentCard";
 import SearchBar from "../../components/SearchBar";
 import CategoryFilter from "../../components/CategoryFilter";
 
-const API_URL = "http://127.0.0.1:8000";
+// Get API base URL from environment variable or default to localhost for development
+const API_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -26,15 +27,22 @@ export default function DashboardPage() {
       const response = await fetch(`${API_URL}/documents`);
 
       if (!response.ok) {
-        throw new Error("Failed to load documents");
+        // Try to get error details from response
+        try {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Failed to load documents: ${response.status}`);
+        } catch (parseError) {
+          throw new Error(`Failed to load documents: ${response.status}`);
+        }
       }
 
       const data = await response.json();
 
-      setDocuments(data.documents || data);
+      setDocuments(data.documents);
     } catch (err) {
       console.error(err);
-      setError("Could not load documents from the backend.");
+      // Show more specific error message if available
+      setError(err.message || "Could not load documents from the backend.");
     } finally {
       setIsLoading(false);
     }
@@ -69,13 +77,21 @@ useEffect(() => {
       );
 
       if (!response.ok) {
-        throw new Error("Search failed");
+        // Try to get error details from response
+        try {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Search failed: ${response.status}`);
+        } catch (parseError) {
+          throw new Error(`Search failed: ${response.status}`);
+        }
       }
 
       const data = await response.json();
       setSearchResults(data.results || []);
     } catch (err) {
       console.error(err);
+      // For search errors, we could set a search-specific error state
+      // For now, just clear results and let the error show in console
       setSearchResults([]);
     }
   };

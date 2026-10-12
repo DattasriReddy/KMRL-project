@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-const API_URL = "http://127.0.0.1:8000";
+// Get API base URL from environment variable or default to localhost for development
+const API_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 export default function DocumentPage() {
   const { id } = useParams();
@@ -21,14 +22,20 @@ export default function DocumentPage() {
         const response = await fetch(`${API_URL}/documents/${id}`);
 
         if (!response.ok) {
-          throw new Error("Document not found");
+          // Try to get error details from response
+          try {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `Document not found: ${response.status}`);
+          } catch (parseError) {
+            throw new Error(`Document not found: ${response.status}`);
+          }
         }
 
         const data = await response.json();
         setDocumentData(data);
       } catch (err) {
         console.error(err);
-        setError("Unable to load this document.");
+        setError(err.message || "Unable to load this document.");
       } finally {
         setIsLoading(false);
       }

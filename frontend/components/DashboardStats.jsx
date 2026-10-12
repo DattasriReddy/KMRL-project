@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-const API_URL = "http://127.0.0.1:8000";
+// Get API base URL from environment variable or default to localhost for development
+const API_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 export default function DashboardStats() {
   const [stats, setStats] = useState({
@@ -18,7 +19,13 @@ export default function DashboardStats() {
         const response = await fetch(`${API_URL}/stats`);
 
         if (!response.ok) {
-          throw new Error("Failed to load stats");
+          // Try to get error details from response
+          try {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `Failed to load stats: ${response.status}`);
+          } catch (parseError) {
+            throw new Error(`Failed to load stats: ${response.status}`);
+          }
         }
 
         const data = await response.json();

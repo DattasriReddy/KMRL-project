@@ -6,6 +6,9 @@ import UploadBox from "@/components/UploadBox";
 import ResultCard from "@/components/ResultCard";
 import Loading from "@/components/Loading";
 
+// Get API base URL from environment variable or default to localhost for development
+const API_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+
 export default function Home() {
   const router = useRouter();
   const [selectedFile, setSelectedFile] = useState(null);
@@ -23,20 +26,27 @@ export default function Home() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch("http://127.0.0.1:8000/upload", {
+      const response = await fetch(`${API_URL}/upload`, {
         method: "POST",
         body: formData,
       });
 
       if (!response.ok) {
-        throw new Error("Upload failed");
+        // Try to get error details from response
+        try {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Upload failed: ${response.status}`);
+        } catch (parseError) {
+          throw new Error(`Upload failed: ${response.status}`);
+        }
       }
 
       const data = await response.json();
       setResult(data);
     } catch (err) {
       console.error(err);
-      setError("Something went wrong while processing the PDF.");
+      // Show more specific error message if available
+      setError(err.message || "Something went wrong while processing the PDF.");
     } finally {
       setIsLoading(false);
     }

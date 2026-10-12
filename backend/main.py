@@ -84,6 +84,26 @@ def home():
 
 
 # ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint for monitoring and debugging"""
+    groq_available = get_groq_client() is not None
+
+    return {
+        "status": "healthy",
+        "groq_api_available": groq_available,
+        "timestamp": datetime.now().isoformat(),
+        "version": "2.0.0",
+        "environment": {
+            "groq_api_key_set": bool(os.getenv("GROQ_API_KEY")),
+        }
+    }
+
+
+# ============================================================
 # BUG LOGGER
 # ============================================================
 

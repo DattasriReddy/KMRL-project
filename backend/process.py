@@ -816,6 +816,14 @@ def analyze_chunk_with_groq(
             "error":"GROQ_API_KEY is missing",
         }
 
+    json_example = '''{
+    "category":"one allowed category",
+    "summary":"short factual summary",
+    "action_items":[],
+    "deadlines":[],
+    "confidence":0.0
+}'''
+
     prompt=f"""
 You are analyzing one part of an official Kochi Metro Rail Limited (KMRL) document.
 
@@ -880,13 +888,7 @@ Use a number between 0.0 and 1.0.
 
 Return ONLY this JSON structure:
 
-{
-    "category":"one allowed category",
-    "summary":"short factual summary",
-    "action_items":[],
-    "deadlines":[],
-    "confidence":0.0
-}
+{json_example}
 
 DOCUMENT CHUNK:
 
@@ -1384,7 +1386,7 @@ def process_pdf(pdf_path):
         f"📌 Action items: "
         f"{len(analysis['action_items'])}"
     )
-    print(f"�5 Deadline: {analysis['deadline']}")
+    print(f" 5 Deadline: {analysis['deadline']}")
     print(
         f"⚠️ Partial analysis: "
         f"{analysis.get('partial_analysis',False)}"
@@ -1397,7 +1399,7 @@ def process_pdf(pdf_path):
         "action_items":analysis["action_items"],
         "deadline":analysis["deadline"],
         "pages":pages,
-        "confidence":analysis["confidence"],
+        "confidence":round(float(analysis["confidence"]),2),
         "partial_analysis":analysis.get(
             "partial_analysis",
             False,
